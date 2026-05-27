@@ -250,6 +250,12 @@ export default function Dashboard() {
     ok('Marked as completed'); await loadData()
   }
 
+  const deleteInvoice = async (id: number) => {
+    const res = await fetch(`${apiBase}/invoices/${id}`, { method: 'DELETE', headers })
+    if (!res.ok) return err('Could not delete invoice')
+    ok('Invoice deleted'); await loadData()
+  }
+
   const downloadRatePdf = async (id: number, invoiceDate: string) => {
     const res = await fetch(`${apiBase}/invoices/${id}/rate-pdf`, { headers })
     if (!res.ok) return err('Rate PDF not available')
@@ -806,6 +812,7 @@ export default function Dashboard() {
                                   {inv.rate_pdf_path && (
                                     <button className="btn btn-ghost btn-sm" onClick={() => downloadRatePdf(inv.id, inv.invoice_date)}>Rate PDF</button>
                                   )}
+                                  <button className="btn btn-danger-soft btn-sm" onClick={() => deleteInvoice(inv.id)}>Delete</button>
                                 </div>
                               </td>
                             </tr>

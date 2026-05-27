@@ -401,6 +401,14 @@ def create_invoice(project_id: int, invoice_date: date = Query(...), db: Session
 def list_invoices(db: Session = Depends(get_db)):
     return db.execute(select(Invoice).order_by(Invoice.invoice_date.desc())).scalars().all()
 
+@app.delete("/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_user)])
+def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    invoice = db.get(Invoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    db.delete(invoice)
+    db.commit()
+
 @app.get("/jobs", response_model=list[JobLogRead], dependencies=[Depends(require_admin_user)])
 def list_job_logs(db: Session = Depends(get_db)):
     return db.execute(select(JobLog).order_by(JobLog.created_at.desc())).scalars().all()
