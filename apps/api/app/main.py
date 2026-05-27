@@ -187,7 +187,7 @@ def home():
     index = os.path.join(_web_out, "index.html")
     if os.path.exists(index):
         return FileResponse(index)
-    return HTMLResponse("<html><body><h1>Recurring Payments API</h1><p><a href='/docs'>API Docs</a></p></body></html>")
+    return HTMLResponse(f"<html><body><h1>Recurring Payments API v2</h1><p>web_out not found at: {_web_out}</p><p><a href='/docs'>API Docs</a></p></body></html>")
 
 
 @app.get("/health")
