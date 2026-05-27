@@ -1,8 +1,11 @@
 [phases.setup]
-nixPkgs = ["python312", "gcc"]
+nixPkgs = ["python312", "python312Packages.pip", "gcc"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
+
+[phases.build]
+cmds = []
 
 [start]
 cmd = "export PYTHONPATH=/app && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
