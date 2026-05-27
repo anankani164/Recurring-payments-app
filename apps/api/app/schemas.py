@@ -140,6 +140,25 @@ class UserRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    client_id: int | None = None
+    billing_currency: str | None = Field(default=None, pattern="^(USD|GHS)$")
+    amount_usd: float | None = Field(default=None, ge=0)
+    amount_ghs: float | None = Field(default=None, gt=0)
+    rate_source_url: HttpUrl | None = None
+    recurrence: RecurrenceType | None = None
+    rate_type: RateType | None = None
+    next_invoice_date: date | None = None
+
+
+class FxRateUpdate(BaseModel):
+    cash_buying: float | None = Field(default=None, gt=0)
+    cash_selling: float | None = Field(default=None, gt=0)
+    tts_buying: float | None = Field(default=None, gt=0)
+    tts_selling: float | None = Field(default=None, gt=0)
+
+
 class UserUpdate(BaseModel):
     username: str | None = Field(default=None, min_length=3, max_length=100)
     email: EmailStr | None = None

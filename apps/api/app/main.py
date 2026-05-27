@@ -40,6 +40,7 @@ from .schemas import (
     ClientRead,
     FxRateCreate,
     FxRateRead,
+    FxRateUpdate,
     InvoiceRead,
     InvoiceStatusUpdate,
     JobLogRead,
@@ -47,6 +48,7 @@ from .schemas import (
     ParsePdfResponse,
     ProjectCreate,
     ProjectRead,
+    ProjectUpdate,
     TokenResponse,
     UserCreate,
     UserLogin,
@@ -310,6 +312,19 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     db.delete(project)
     db.commit()
 
+@app.patch("/projects/{project_id}", response_model=ProjectRead, dependencies=[Depends(require_admin_user)])
+def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == 'rate_source_url' and value is not None:
+            value = str(value)
+        setattr(project, field, value)
+    db.commit()
+    db.refresh(project)
+    return project
+
 @app.post("/rates", response_model=FxRateRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_user)])
 def create_rate(payload: FxRateCreate, db: Session = Depends(get_db)):
     rate = FxRate(**payload.model_dump())
@@ -333,6 +348,17 @@ def delete_rate(rate_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Rate not found")
     db.delete(rate)
     db.commit()
+
+@app.patch("/rates/{rate_id}", response_model=FxRateRead, dependencies=[Depends(require_admin_user)])
+def update_rate(rate_id: int, payload: FxRateUpdate, db: Session = Depends(get_db)):
+    rate = db.get(FxRate, rate_id)
+    if not rate:
+        raise HTTPException(status_code=404, detail="Rate not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(rate, field, value)
+    db.commit()
+    db.refresh(rate)
+    return rate
 
 @app.post("/rates/parse-pdf", response_model=ParsePdfResponse, dependencies=[Depends(require_current_user)])
 def parse_pdf_rates(payload: ParsePdfRequest):

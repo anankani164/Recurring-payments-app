@@ -109,6 +109,22 @@ export default function Dashboard() {
   const [invoiceProjectId, setInvoiceProjectId] = useState('')
   const [invoiceDate,      setInvoiceDate]      = useState('')
 
+  const [editingProject, setEditingProject] = useState<number | null>(null)
+  const [editProjName,        setEditProjName]        = useState('')
+  const [editProjCurrency,    setEditProjCurrency]    = useState('USD')
+  const [editProjAmountUsd,   setEditProjAmountUsd]   = useState('')
+  const [editProjAmountGhs,   setEditProjAmountGhs]   = useState('')
+  const [editProjRateUrl,     setEditProjRateUrl]     = useState('')
+  const [editProjRecurrence,  setEditProjRecurrence]  = useState('monthly')
+  const [editProjRateType,    setEditProjRateType]    = useState('tts_selling')
+  const [editProjNextDate,    setEditProjNextDate]    = useState('')
+
+  const [editingRate, setEditingRate] = useState<number | null>(null)
+  const [editRateCashBuy,  setEditRateCashBuy]  = useState('')
+  const [editRateCashSell, setEditRateCashSell] = useState('')
+  const [editRateTtsBuy,   setEditRateTtsBuy]   = useState('')
+  const [editRateTtsSell,  setEditRateTtsSell]  = useState('')
+
   const [newUsername, setNewUsername] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
@@ -236,10 +252,64 @@ export default function Dashboard() {
     ok('Project deleted'); await loadData()
   }
 
+  const openEditProject = (p: Project) => {
+    setEditingProject(p.id)
+    setEditProjName(p.name)
+    setEditProjCurrency(p.billing_currency)
+    setEditProjAmountUsd(String(p.amount_usd))
+    setEditProjAmountGhs(p.amount_ghs != null ? String(p.amount_ghs) : '')
+    setEditProjRateUrl(p.rate_source_url ?? '')
+    setEditProjRecurrence(p.recurrence)
+    setEditProjRateType(p.rate_type)
+    setEditProjNextDate(p.next_invoice_date)
+  }
+
+  const saveProject = async (id: number) => {
+    const body: Record<string, unknown> = {
+      name: editProjName,
+      billing_currency: editProjCurrency,
+      recurrence: editProjRecurrence,
+      rate_type: editProjRateType,
+      next_invoice_date: editProjNextDate,
+    }
+    if (editProjCurrency === 'USD') {
+      body.amount_usd = Number(editProjAmountUsd)
+      body.rate_source_url = editProjRateUrl || null
+    } else {
+      body.amount_ghs = Number(editProjAmountGhs)
+    }
+    const res = await fetch(`${apiBase}/projects/${id}`, { method: 'PATCH', headers, body: JSON.stringify(body) })
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      return err(detail?.detail ?? 'Could not update project')
+    }
+    setEditingProject(null); ok('Project updated'); await loadData()
+  }
+
   const deleteRate = async (id: number) => {
     const res = await fetch(`${apiBase}/rates/${id}`, { method: 'DELETE', headers })
     if (!res.ok) return err('Could not delete rate')
     ok('Rate deleted'); await loadData()
+  }
+
+  const openEditRate = (r: FxRate) => {
+    setEditingRate(r.id)
+    setEditRateCashBuy(String(r.cash_buying))
+    setEditRateCashSell(String(r.cash_selling))
+    setEditRateTtsBuy(String(r.tts_buying))
+    setEditRateTtsSell(String(r.tts_selling))
+  }
+
+  const saveRate = async (id: number) => {
+    const body = {
+      cash_buying:  Number(editRateCashBuy),
+      cash_selling: Number(editRateCashSell),
+      tts_buying:   Number(editRateTtsBuy),
+      tts_selling:  Number(editRateTtsSell),
+    }
+    const res = await fetch(`${apiBase}/rates/${id}`, { method: 'PATCH', headers, body: JSON.stringify(body) })
+    if (!res.ok) return err('Could not update rate')
+    setEditingRate(null); ok('Rate updated'); await loadData()
   }
 
   const markInvoiceComplete = async (id: number) => {
@@ -603,17 +673,87 @@ export default function Dashboard() {
                         <thead><tr><th>#</th><th>Name</th><th>Client</th><th>Amount</th><th>Rate Type</th><th>Next Invoice</th><th></th></tr></thead>
                         <tbody>
                           {pagedProjects.map(p => (
-                            <tr key={p.id}>
-                              <td className="td-id">{p.id}</td>
-                              <td data-label="Name"><strong>{p.name}</strong></td>
-                              <td data-label="Client" style={{ color: 'var(--text-muted)' }}>{clients.find(c => c.id === p.client_id)?.name ?? `#${p.client_id}`}</td>
-                              <td data-label="Amount" className="td-mono">{p.billing_currency === 'GHS' ? `GHS ${(p.amount_ghs ?? 0).toFixed(2)}` : `$${p.amount_usd.toFixed(2)}`}</td>
-                              <td data-label="Rate Type"><span className="badge badge-grey">{p.rate_type}</span></td>
-                              <td data-label="Next Invoice" className="td-mono" style={{ color: new Date(p.next_invoice_date) <= new Date() ? 'var(--danger)' : 'var(--text)' }}>{p.next_invoice_date}</td>
-                              <td data-label="" style={{ textAlign: 'right' }}>
-                                <button className="btn btn-danger-soft btn-sm" onClick={() => deleteProject(p.id)}>Delete</button>
-                              </td>
-                            </tr>
+                            <Fragment key={p.id}>
+                              <tr>
+                                <td className="td-id">{p.id}</td>
+                                <td data-label="Name"><strong>{p.name}</strong></td>
+                                <td data-label="Client" style={{ color: 'var(--text-muted)' }}>{clients.find(c => c.id === p.client_id)?.name ?? `#${p.client_id}`}</td>
+                                <td data-label="Amount" className="td-mono">{p.billing_currency === 'GHS' ? `GHS ${(p.amount_ghs ?? 0).toFixed(2)}` : `$${p.amount_usd.toFixed(2)}`}</td>
+                                <td data-label="Rate Type"><span className="badge badge-grey">{p.rate_type}</span></td>
+                                <td data-label="Next Invoice" className="td-mono" style={{ color: new Date(p.next_invoice_date) <= new Date() ? 'var(--danger)' : 'var(--text)' }}>{p.next_invoice_date}</td>
+                                <td data-label="" style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => editingProject === p.id ? setEditingProject(null) : openEditProject(p)}>{editingProject === p.id ? 'Cancel' : 'Edit'}</button>
+                                    <button className="btn btn-danger-soft btn-sm" onClick={() => deleteProject(p.id)}>Delete</button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {editingProject === p.id && (
+                                <tr>
+                                  <td colSpan={7} style={{ padding: '12px 14px', background: 'var(--surface-2)' }}>
+                                    <div className="form-grid" style={{ gap: 10 }}>
+                                      <div className="form-row">
+                                        <div className="form-group">
+                                          <label className="form-label">Name</label>
+                                          <input className="input" value={editProjName} onChange={e => setEditProjName(e.target.value)} />
+                                        </div>
+                                        <div className="form-group">
+                                          <label className="form-label">Billing Currency</label>
+                                          <select className="select" value={editProjCurrency} onChange={e => setEditProjCurrency(e.target.value)}>
+                                            <option value="USD">USD</option>
+                                            <option value="GHS">GHS</option>
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <div className="form-row">
+                                        {editProjCurrency === 'USD' ? (
+                                          <div className="form-group">
+                                            <label className="form-label">Amount (USD)</label>
+                                            <input className="input" type="number" step="0.01" value={editProjAmountUsd} onChange={e => setEditProjAmountUsd(e.target.value)} />
+                                          </div>
+                                        ) : (
+                                          <div className="form-group">
+                                            <label className="form-label">Amount (GHS)</label>
+                                            <input className="input" type="number" step="0.01" value={editProjAmountGhs} onChange={e => setEditProjAmountGhs(e.target.value)} />
+                                          </div>
+                                        )}
+                                        <div className="form-group">
+                                          <label className="form-label">Next Invoice Date</label>
+                                          <input className="input" type="date" value={editProjNextDate} onChange={e => setEditProjNextDate(e.target.value)} />
+                                        </div>
+                                      </div>
+                                      {editProjCurrency === 'USD' && (
+                                        <div className="form-group">
+                                          <label className="form-label">Rate Source URL (optional)</label>
+                                          <input className="input" type="url" value={editProjRateUrl} onChange={e => setEditProjRateUrl(e.target.value)} placeholder="https://bank.example/forex.pdf" />
+                                        </div>
+                                      )}
+                                      <div className="form-row">
+                                        <div className="form-group">
+                                          <label className="form-label">Recurrence</label>
+                                          <select className="select" value={editProjRecurrence} onChange={e => setEditProjRecurrence(e.target.value)}>
+                                            <option value="weekly">Weekly</option>
+                                            <option value="biweekly">Biweekly</option>
+                                            <option value="monthly">Monthly</option>
+                                            <option value="biannually">Biannually</option>
+                                          </select>
+                                        </div>
+                                        <div className="form-group">
+                                          <label className="form-label">Rate Type</label>
+                                          <select className="select" value={editProjRateType} onChange={e => setEditProjRateType(e.target.value)} disabled={editProjCurrency === 'GHS'}>
+                                            {RATE_TYPES.map(r => <option key={r} value={r}>{r}</option>)}
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <div className="form-actions">
+                                        <button className="btn btn-primary btn-sm" onClick={() => saveProject(p.id)}>Save Changes</button>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => setEditingProject(null)}>Cancel</button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           ))}
                         </tbody>
                       </table>
@@ -730,15 +870,54 @@ export default function Dashboard() {
                         <thead><tr><th>Date</th><th>Code</th><th>Cash Buy</th><th>Cash Sell</th><th>TTS Buy</th><th>TTS Sell</th><th></th></tr></thead>
                         <tbody>
                           {pagedRates.map(r => (
-                            <tr key={r.id}>
-                              <td data-label="Date" className="td-mono">{r.rate_date}</td>
-                              <td data-label="Code"><span className="badge badge-blue">{r.code}</span></td>
-                              <td data-label="Cash Buy" className="td-mono">{r.cash_buying}</td>
-                              <td data-label="Cash Sell" className="td-mono">{r.cash_selling}</td>
-                              <td data-label="TTS Buy" className="td-mono">{r.tts_buying}</td>
-                              <td data-label="TTS Sell" className="td-mono">{r.tts_selling}</td>
-                              <td data-label=""><button className="btn btn-danger-soft btn-sm" onClick={() => deleteRate(r.id)}>Delete</button></td>
-                            </tr>
+                            <Fragment key={r.id}>
+                              <tr>
+                                <td data-label="Date" className="td-mono">{r.rate_date}</td>
+                                <td data-label="Code"><span className="badge badge-blue">{r.code}</span></td>
+                                <td data-label="Cash Buy" className="td-mono">{r.cash_buying}</td>
+                                <td data-label="Cash Sell" className="td-mono">{r.cash_selling}</td>
+                                <td data-label="TTS Buy" className="td-mono">{r.tts_buying}</td>
+                                <td data-label="TTS Sell" className="td-mono">{r.tts_selling}</td>
+                                <td data-label="">
+                                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => editingRate === r.id ? setEditingRate(null) : openEditRate(r)}>{editingRate === r.id ? 'Cancel' : 'Edit'}</button>
+                                    <button className="btn btn-danger-soft btn-sm" onClick={() => deleteRate(r.id)}>Delete</button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {editingRate === r.id && (
+                                <tr>
+                                  <td colSpan={7} style={{ padding: '12px 14px', background: 'var(--surface-2)' }}>
+                                    <div className="form-grid" style={{ gap: 10 }}>
+                                      <div className="form-row">
+                                        <div className="form-group">
+                                          <label className="form-label">Cash Buying</label>
+                                          <input className="input" type="number" step="0.0001" value={editRateCashBuy} onChange={e => setEditRateCashBuy(e.target.value)} />
+                                        </div>
+                                        <div className="form-group">
+                                          <label className="form-label">Cash Selling</label>
+                                          <input className="input" type="number" step="0.0001" value={editRateCashSell} onChange={e => setEditRateCashSell(e.target.value)} />
+                                        </div>
+                                      </div>
+                                      <div className="form-row">
+                                        <div className="form-group">
+                                          <label className="form-label">TTS Buying</label>
+                                          <input className="input" type="number" step="0.0001" value={editRateTtsBuy} onChange={e => setEditRateTtsBuy(e.target.value)} />
+                                        </div>
+                                        <div className="form-group">
+                                          <label className="form-label">TTS Selling</label>
+                                          <input className="input" type="number" step="0.0001" value={editRateTtsSell} onChange={e => setEditRateTtsSell(e.target.value)} />
+                                        </div>
+                                      </div>
+                                      <div className="form-actions">
+                                        <button className="btn btn-primary btn-sm" onClick={() => saveRate(r.id)}>Save Changes</button>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => setEditingRate(null)}>Cancel</button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           ))}
                         </tbody>
                       </table>
