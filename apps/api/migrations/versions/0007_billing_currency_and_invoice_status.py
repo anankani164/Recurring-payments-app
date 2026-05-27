@@ -7,7 +7,7 @@ Create Date: 2026-05-27
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0007_billing_currency_and_invoice_status"
+revision = "0007_billing_invoice_status"
 down_revision = "0006_fix_superadmin_email"
 branch_labels = None
 depends_on = None
