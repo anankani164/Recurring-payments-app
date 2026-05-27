@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import date
 from datetime import datetime, timedelta
 import os
+from pathlib import Path
 from uuid import uuid4
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -40,6 +41,7 @@ from .schemas import (
     FxRateCreate,
     FxRateRead,
     InvoiceRead,
+    InvoiceStatusUpdate,
     JobLogRead,
     ParsePdfRequest,
     ParsePdfResponse,
@@ -51,7 +53,7 @@ from .schemas import (
     UserRead,
     UserUpdate,
 )
-from .services import create_job_log, generate_invoice_for_project, send_invoice_email
+from .services import cleanup_old_rate_pdfs, create_job_log, generate_invoice_for_project, send_invoice_email
 
 scheduler = BackgroundScheduler()
 
@@ -132,6 +134,9 @@ def run_embedded_worker() -> None:
                             create_job_log(db, "alert_email", "failed", str(alert_exc))
 
             create_job_log(db, "embedded_worker", "success", f"Run finished. projects_due={len(projects)}")
+            cleaned = cleanup_old_rate_pdfs()
+            if cleaned:
+                create_job_log(db, "pdf_cleanup", "success", f"Deleted {cleaned} old rate PDFs")
         finally:
             release_distributed_lock(db, lock_name, owner_id)
 
@@ -396,3 +401,26 @@ def list_invoices(db: Session = Depends(get_db)):
 @app.get("/jobs", response_model=list[JobLogRead], dependencies=[Depends(require_admin_user)])
 def list_job_logs(db: Session = Depends(get_db)):
     return db.execute(select(JobLog).order_by(JobLog.created_at.desc())).scalars().all()
+
+@app.patch("/invoices/{invoice_id}/status", response_model=InvoiceRead, dependencies=[Depends(require_admin_user)])
+def update_invoice_status(invoice_id: int, payload: InvoiceStatusUpdate, db: Session = Depends(get_db)):
+    invoice = db.get(Invoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice.status = payload.status
+    db.commit()
+    db.refresh(invoice)
+    return invoice
+
+@app.get("/invoices/{invoice_id}/rate-pdf", dependencies=[Depends(require_current_user)])
+def download_invoice_rate_pdf(invoice_id: int, db: Session = Depends(get_db)):
+    invoice = db.get(Invoice, invoice_id)
+    if not invoice or not invoice.rate_pdf_path:
+        raise HTTPException(status_code=404, detail="No rate PDF for this invoice")
+    if not os.path.exists(invoice.rate_pdf_path):
+        raise HTTPException(status_code=404, detail="Rate PDF file not found on disk")
+    return FileResponse(
+        invoice.rate_pdf_path,
+        media_type="application/pdf",
+        filename=f"rate_proof_{invoice.invoice_date}.pdf",
+    )

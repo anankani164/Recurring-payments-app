@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from .models import FxRate, Invoice, JobLog, Project
 from .observability import log_event
 
+PDF_RATES_DIR = os.getenv("PDF_RATES_DIR", "/app/rate_pdfs")
+
 
 def get_rate_value(rate: FxRate, rate_type: str) -> float:
     mapping = {
@@ -26,8 +28,12 @@ def get_rate_value(rate: FxRate, rate_type: str) -> float:
 def next_date_for_recurrence(current_date: date, recurrence: str) -> date:
     if recurrence == "weekly":
         return current_date + relativedelta(weeks=1)
+    if recurrence == "biweekly":
+        return current_date + relativedelta(weeks=2)
     if recurrence == "monthly":
         return current_date + relativedelta(months=1)
+    if recurrence == "biannually":
+        return current_date + relativedelta(months=6)
     raise ValueError(f"Unsupported recurrence: {recurrence}")
 
 
@@ -45,24 +51,79 @@ def resolve_rate_for_date(db: Session, invoice_date: date) -> FxRate:
     raise ValueError("No FX rate available")
 
 
-def generate_invoice_for_project(db: Session, project: Project, invoice_date: date) -> Invoice:
+def generate_invoice_for_project(db: Session, project, invoice_date: date) -> object:
     existing = db.execute(
         select(Invoice).where(Invoice.project_id == project.id, Invoice.invoice_date == invoice_date)
     ).scalars().first()
     if existing:
         return existing
 
-    rate = resolve_rate_for_date(db, invoice_date)
-    fx = get_rate_value(rate, project.rate_type)
-    amount_ghs = round(project.amount_usd * fx, 2)
+    rate_pdf_path: str | None = None
+
+    if project.billing_currency == "GHS":
+        # Fixed GHS amount — no FX lookup needed
+        if not project.amount_ghs:
+            raise ValueError("amount_ghs is required for GHS-billed projects")
+        amount_ghs = project.amount_ghs
+        fx = 1.0
+        source_rate_date = invoice_date
+    else:
+        # USD billing — resolve or auto-fetch FX rate
+        if project.rate_source_url:
+            # Try to auto-fetch from the project's PDF URL
+            try:
+                from .pdf_rates import fetch_and_save_pdf, _parse_from_path, PdfParseError
+                import tempfile
+                from pathlib import Path
+                from sqlalchemy.exc import IntegrityError as _IE
+                from .models import FxRate as _FxR
+
+                pdf_bytes, saved_path = fetch_and_save_pdf(project.rate_source_url, PDF_RATES_DIR)
+                rate_pdf_path = saved_path
+
+                # Parse and upsert the rate
+                with tempfile.NamedTemporaryFile(prefix="fx_auto_", suffix=".pdf", delete=False) as tmp:
+                    tmp.write(pdf_bytes)
+                    tmp_path = Path(tmp.name)
+                try:
+                    parsed = _parse_from_path(tmp_path, "USD")
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+
+                new_rate = _FxR(source_url=project.rate_source_url, **parsed)
+                db.add(new_rate)
+                try:
+                    db.commit()
+                    db.refresh(new_rate)
+                    fetched_rate = new_rate
+                except _IE:
+                    db.rollback()
+                    # Rate already exists for that date — fetch it
+                    fetched_rate = db.execute(
+                        select(_FxR).where(_FxR.rate_date == parsed["rate_date"], _FxR.code == "USD")
+                    ).scalars().first() or resolve_rate_for_date(db, invoice_date)
+
+                rate = fetched_rate
+            except Exception:  # noqa: BLE001
+                # Fall back to most recent stored rate
+                rate = resolve_rate_for_date(db, invoice_date)
+        else:
+            rate = resolve_rate_for_date(db, invoice_date)
+
+        fx = get_rate_value(rate, project.rate_type)
+        amount_ghs = round(project.amount_usd * fx, 2)
+        source_rate_date = rate.rate_date
+
     invoice = Invoice(
         project_id=project.id,
         invoice_date=invoice_date,
-        amount_usd=project.amount_usd,
+        amount_usd=project.amount_usd if project.billing_currency == "USD" else 0.0,
         fx_rate=fx,
         amount_ghs=amount_ghs,
-        rate_type=project.rate_type,
-        source_rate_date=rate.rate_date,
+        rate_type=project.rate_type if project.billing_currency == "USD" else "fixed_ghs",
+        source_rate_date=source_rate_date,
+        status="pending",
+        rate_pdf_path=rate_pdf_path,
     )
     db.add(invoice)
     project.next_invoice_date = next_date_for_recurrence(invoice_date, project.recurrence)
@@ -98,3 +159,27 @@ def create_job_log(db: Session, job_name: str, status: str, message: str) -> Non
     db.commit()
     level = "error" if status in {"failed"} else "info"
     log_event(level, "job_log", job_name=job_name, status=status, message=message[:500])
+
+
+def cleanup_old_rate_pdfs(max_age_days: int = 90) -> int:
+    """Delete rate PDF files older than max_age_days. Returns count deleted."""
+    import os
+    from datetime import datetime, timedelta
+
+    pdf_dir = os.getenv("PDF_RATES_DIR", "/app/rate_pdfs")
+    if not os.path.isdir(pdf_dir):
+        return 0
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    deleted = 0
+    for fname in os.listdir(pdf_dir):
+        if not fname.endswith(".pdf"):
+            continue
+        fpath = os.path.join(pdf_dir, fname)
+        try:
+            mtime = datetime.utcfromtimestamp(os.path.getmtime(fpath))
+            if mtime < cutoff:
+                os.remove(fpath)
+                deleted += 1
+        except OSError:
+            pass
+    return deleted

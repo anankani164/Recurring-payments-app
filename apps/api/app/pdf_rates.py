@@ -167,6 +167,32 @@ def _parse_from_path(pdf_path: Path, target_code: str) -> dict:
     raise PdfParseError(f"Could not find {code} rates in PDF table, text, or OCR fallback")
 
 
+def fetch_and_save_pdf(source_url: str, save_dir: str) -> tuple[bytes, str]:
+    """Download a PDF from source_url, save it to save_dir, return (bytes, saved_path)."""
+    import os
+    response = httpx.get(
+        source_url,
+        timeout=30.0,
+        follow_redirects=True,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
+        },
+    )
+    response.raise_for_status()
+    pdf_bytes = response.content
+    os.makedirs(save_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"rate_{ts}.pdf"
+    path = os.path.join(save_dir, filename)
+    with open(path, "wb") as f:
+        f.write(pdf_bytes)
+    return pdf_bytes, path
+
+
 def parse_bank_pdf_rates(source_url: str, target_code: str = "USD") -> dict:
     code = target_code.upper().strip()
     if not code:

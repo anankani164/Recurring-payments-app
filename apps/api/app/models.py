@@ -39,6 +39,9 @@ class Project(Base):
     recurrence: Mapped[str] = mapped_column(String(50), default="monthly")
     rate_type: Mapped[str] = mapped_column(String(50), default="tts_selling")
     next_invoice_date: Mapped[date] = mapped_column(Date)
+    billing_currency: Mapped[str] = mapped_column(String(3), default="USD")
+    amount_ghs: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rate_source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     client = relationship("Client", back_populates="projects")
 
@@ -71,6 +74,8 @@ class Invoice(Base):
     rate_type: Mapped[str] = mapped_column(String(50))
     source_rate_date: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    rate_pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class JobLog(Base):

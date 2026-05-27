@@ -3,9 +3,17 @@
 import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react'
 
 type Client = { id: number; name: string; email: string }
-type Project = { id: number; name: string; client_id: number; amount_usd: number; recurrence: string; rate_type: string; next_invoice_date: string }
+type Project = {
+  id: number; name: string; client_id: number;
+  billing_currency: string; amount_usd: number; amount_ghs: number | null;
+  rate_source_url: string | null; recurrence: string; rate_type: string; next_invoice_date: string
+}
 type FxRate = { id: number; rate_date: string; code: string; cash_buying: number; cash_selling: number; tts_buying: number; tts_selling: number; source_url: string }
-type Invoice = { id: number; project_id: number; invoice_date: string; amount_usd: number; fx_rate: number; amount_ghs: number; rate_type: string; source_rate_date: string }
+type Invoice = {
+  id: number; project_id: number; invoice_date: string; amount_usd: number;
+  fx_rate: number; amount_ghs: number; rate_type: string; source_rate_date: string;
+  status: string; rate_pdf_path: string | null
+}
 type JobLog = { id: number; job_name: string; status: string; message: string; created_at: string }
 type User = { id: number; username: string; email: string; role: string; is_active: boolean }
 type Tab = 'overview' | 'clients' | 'projects' | 'rates' | 'invoices' | 'jobs' | 'users'

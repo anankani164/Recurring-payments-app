@@ -14,6 +14,8 @@ class RateType(str, Enum):
 class RecurrenceType(str, Enum):
     monthly = "monthly"
     weekly = "weekly"
+    biweekly = "biweekly"
+    biannually = "biannually"
 
 
 class ClientCreate(BaseModel):
@@ -31,7 +33,10 @@ class ClientRead(BaseModel):
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     client_id: int
-    amount_usd: float = Field(gt=0)
+    billing_currency: str = Field(default="USD", pattern="^(USD|GHS)$")
+    amount_usd: float = Field(default=0.0, ge=0)
+    amount_ghs: float | None = Field(default=None, gt=0)
+    rate_source_url: HttpUrl | None = None
     recurrence: RecurrenceType = RecurrenceType.monthly
     rate_type: RateType = RateType.tts_selling
     next_invoice_date: date
@@ -41,7 +46,10 @@ class ProjectRead(BaseModel):
     id: int
     name: str
     client_id: int
+    billing_currency: str
     amount_usd: float
+    amount_ghs: float | None
+    rate_source_url: str | None
     recurrence: str
     rate_type: str
     next_invoice_date: date
@@ -79,7 +87,13 @@ class InvoiceRead(BaseModel):
     amount_ghs: float
     rate_type: str
     source_rate_date: date
+    status: str
+    rate_pdf_path: str | None
     model_config = {"from_attributes": True}
+
+
+class InvoiceStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(pending|completed)$")
 
 
 class ParsePdfRequest(BaseModel):
