@@ -15,5 +15,3 @@ def validate_runtime_config() -> None:
         raise RuntimeError("JWT_SECRET must be configured for production safety")
     if SCHEDULER_INTERVAL_MINUTES < 1:
         raise RuntimeError("SCHEDULER_INTERVAL_MINUTES must be >= 1")
-    if CORS_ORIGINS == ["*"]:
-        raise RuntimeError("CORS_ORIGINS must be an explicit origin list in production")
