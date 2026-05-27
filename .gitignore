@@ -6,7 +6,7 @@ __pycache__/
 # Node
 node_modules/
 .next/
-# out/ is intentionally NOT ignored — pre-built and committed for Railway
+apps/web/out/
 
 # Env
 .env
