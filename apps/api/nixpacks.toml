@@ -1,17 +1,8 @@
 [phases.setup]
-nixPkgs = ["python312", "nodejs_20", "gcc"]
+nixPkgs = ["python312", "gcc"]
 
 [phases.install]
-cmds = [
-  "pip install -r requirements.txt",
-  "cd ../web && npm install"
-]
-
-[phases.build]
-cmds = [
-  "cd ../web && npm run build",
-  "cp -r ../web/out web_out"
-]
+cmds = ["pip install -r requirements.txt"]
 
 [start]
 cmd = "export PYTHONPATH=/app && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
