@@ -1,5 +1,9 @@
 from logging.config import fileConfig
 import os
+import sys
+
+# Ensure the service root (parent of migrations/) is on sys.path so `app.*` imports work
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
