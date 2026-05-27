@@ -88,6 +88,9 @@ export default function Dashboard() {
   const [amountUsd,       setAmountUsd]       = useState('')
   const [nextDate,        setNextDate]        = useState('')
   const [rateType,        setRateType]        = useState('tts_selling')
+  const [billingCurrency, setBillingCurrency] = useState('USD')
+  const [amountGhs,       setAmountGhs]       = useState('')
+  const [rateSourceUrl,   setRateSourceUrl]   = useState('')
 
   const [pdfUrl,    setPdfUrl]    = useState('')
   const [pdfFile,   setPdfFile]   = useState<File | null>(null)
@@ -200,14 +203,26 @@ export default function Dashboard() {
   const addProject = async (e: FormEvent) => {
     e.preventDefault(); setMsg('')
     if (!projectClientId) return err('Please select a client')
-    if (!amountUsd || Number(amountUsd) <= 0) return err('Amount must be greater than 0')
+    if (billingCurrency === 'USD' && (!amountUsd || Number(amountUsd) <= 0)) return err('Amount (USD) must be greater than 0')
+    if (billingCurrency === 'GHS' && (!amountGhs || Number(amountGhs) <= 0)) return err('Amount (GHS) must be greater than 0')
     if (!nextDate) return err('Next invoice date is required')
     const res = await fetch(`${apiBase}/projects`, {
       method: 'POST', headers,
-      body: JSON.stringify({ name: projectName, client_id: Number(projectClientId), amount_usd: Number(amountUsd), recurrence: 'monthly', rate_type: rateType, next_invoice_date: nextDate }),
+      body: JSON.stringify({
+        name: projectName,
+        client_id: Number(projectClientId),
+        billing_currency: billingCurrency,
+        amount_usd: billingCurrency === 'USD' ? Number(amountUsd) : 0,
+        amount_ghs: billingCurrency === 'GHS' ? Number(amountGhs) : undefined,
+        rate_source_url: billingCurrency === 'USD' && rateSourceUrl ? rateSourceUrl : undefined,
+        recurrence: 'monthly',
+        rate_type: rateType,
+        next_invoice_date: nextDate
+      }),
     })
     if (!res.ok) return err('Could not create project')
     setProjectName(''); setProjectClientId(''); setAmountUsd(''); setNextDate(''); setRateType('tts_selling')
+    setBillingCurrency('USD'); setAmountGhs(''); setRateSourceUrl('')
     ok('Project created'); await loadData()
   }
 
@@ -221,6 +236,25 @@ export default function Dashboard() {
     const res = await fetch(`${apiBase}/rates/${id}`, { method: 'DELETE', headers })
     if (!res.ok) return err('Could not delete rate')
     ok('Rate deleted'); await loadData()
+  }
+
+  const markInvoiceComplete = async (id: number) => {
+    const res = await fetch(`${apiBase}/invoices/${id}/status`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ status: 'completed' })
+    })
+    if (!res.ok) return err('Could not update invoice')
+    ok('Marked as completed'); await loadData()
+  }
+
+  const downloadRatePdf = async (id: number, invoiceDate: string) => {
+    const res = await fetch(`${apiBase}/invoices/${id}/rate-pdf`, { headers })
+    if (!res.ok) return err('Rate PDF not available')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `rate_proof_${invoiceDate}.pdf`
+    a.click(); URL.revokeObjectURL(url)
   }
 
   const addManualRate = async (e: FormEvent) => {
@@ -495,10 +529,41 @@ export default function Dashboard() {
                       </select>
                     </div>
                   </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Billing Currency</label>
+                      <select className="select" value={billingCurrency} onChange={e => { setBillingCurrency(e.target.value); setAmountGhs(''); setRateSourceUrl('') }}>
+                        <option value="USD">USD</option>
+                        <option value="GHS">GHS</option>
+                      </select>
+                    </div>
+                    {billingCurrency === 'USD' ? (
+                      <div className="form-group">
+                        <label className="form-label">Amount (USD)</label>
+                        <input className="input" type="number" step="0.01" min="0.01" placeholder="500.00" value={amountUsd} onChange={e => setAmountUsd(e.target.value)} required />
+                      </div>
+                    ) : (
+                      <div className="form-group">
+                        <label className="form-label">Amount (GHS)</label>
+                        <input className="input" type="number" step="0.01" min="0.01" placeholder="5000.00" value={amountGhs} onChange={e => setAmountGhs(e.target.value)} required />
+                      </div>
+                    )}
+                  </div>
+                  {billingCurrency === 'USD' && (
+                    <div className="form-group">
+                      <label className="form-label">Rate Source PDF URL (optional)</label>
+                      <input className="input" type="url" placeholder="https://bank.example/forex.pdf" value={rateSourceUrl} onChange={e => setRateSourceUrl(e.target.value)} />
+                    </div>
+                  )}
                   <div className="form-row-3">
                     <div className="form-group">
-                      <label className="form-label">Amount (USD)</label>
-                      <input className="input" type="number" step="0.01" min="0.01" placeholder="500.00" value={amountUsd} onChange={e => setAmountUsd(e.target.value)} required />
+                      <label className="form-label">Recurrence</label>
+                      <select className="select" value="monthly" disabled>
+                        <option value="weekly">Weekly</option>
+                        <option value="biweekly">Biweekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="biannually">Biannually</option>
+                      </select>
                     </div>
                     <div className="form-group">
                       <label className="form-label">Next Invoice Date</label>
@@ -506,7 +571,7 @@ export default function Dashboard() {
                     </div>
                     <div className="form-group">
                       <label className="form-label">Rate Type</label>
-                      <select className="select" value={rateType} onChange={e => setRateType(e.target.value)}>
+                      <select className="select" value={rateType} onChange={e => setRateType(e.target.value)} disabled={billingCurrency === 'GHS'}>
                         {RATE_TYPES.map(r => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </div>
@@ -716,7 +781,7 @@ export default function Dashboard() {
                   <>
                     <div className="table-wrap">
                       <table>
-                        <thead><tr><th>#</th><th>Date</th><th>Project</th><th>USD</th><th>FX Rate</th><th>GHS</th><th>Type</th></tr></thead>
+                        <thead><tr><th>#</th><th>Date</th><th>Project</th><th>USD</th><th>FX Rate</th><th>GHS</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
                         <tbody>
                           {pagedInvoices.map(inv => (
                             <tr key={inv.id}>
@@ -727,6 +792,19 @@ export default function Dashboard() {
                               <td className="td-mono">{inv.fx_rate}</td>
                               <td className="td-mono">GHS {inv.amount_ghs.toFixed(2)}</td>
                               <td><span className="badge badge-grey">{inv.rate_type}</span></td>
+                              <td>
+                                <span className={`badge ${inv.status === 'completed' ? 'badge-green' : 'badge-yellow'}`}>{inv.status}</span>
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  {inv.status === 'pending' && (
+                                    <button className="btn btn-secondary btn-sm" onClick={() => markInvoiceComplete(inv.id)}>Mark Complete</button>
+                                  )}
+                                  {inv.rate_pdf_path && (
+                                    <button className="btn btn-ghost btn-sm" onClick={() => downloadRatePdf(inv.id, inv.invoice_date)}>Rate PDF</button>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
