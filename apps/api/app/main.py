@@ -318,6 +318,14 @@ def create_rate(payload: FxRateCreate, db: Session = Depends(get_db)):
 def list_rates(db: Session = Depends(get_db)):
     return db.execute(select(FxRate).order_by(FxRate.rate_date.desc())).scalars().all()
 
+@app.delete("/rates/{rate_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_user)])
+def delete_rate(rate_id: int, db: Session = Depends(get_db)):
+    rate = db.get(FxRate, rate_id)
+    if not rate:
+        raise HTTPException(status_code=404, detail="Rate not found")
+    db.delete(rate)
+    db.commit()
+
 @app.post("/rates/parse-pdf", response_model=ParsePdfResponse, dependencies=[Depends(require_current_user)])
 def parse_pdf_rates(payload: ParsePdfRequest):
     try:

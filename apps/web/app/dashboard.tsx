@@ -209,6 +209,12 @@ export default function Dashboard() {
     ok('Project deleted'); await loadData()
   }
 
+  const deleteRate = async (id: number) => {
+    const res = await fetch(`${apiBase}/rates/${id}`, { method: 'DELETE', headers })
+    if (!res.ok) return err('Could not delete rate')
+    ok('Rate deleted'); await loadData()
+  }
+
   const addManualRate = async (e: FormEvent) => {
     e.preventDefault(); setMsg('')
     if (!manualRateDate) return err('Rate date is required')
@@ -638,7 +644,7 @@ export default function Dashboard() {
                   <>
                     <div className="table-wrap">
                       <table>
-                        <thead><tr><th>Date</th><th>Code</th><th>Cash Buy</th><th>Cash Sell</th><th>TTS Buy</th><th>TTS Sell</th></tr></thead>
+                        <thead><tr><th>Date</th><th>Code</th><th>Cash Buy</th><th>Cash Sell</th><th>TTS Buy</th><th>TTS Sell</th><th></th></tr></thead>
                         <tbody>
                           {pagedRates.map(r => (
                             <tr key={r.id}>
@@ -648,6 +654,7 @@ export default function Dashboard() {
                               <td className="td-mono">{r.cash_selling}</td>
                               <td className="td-mono">{r.tts_buying}</td>
                               <td className="td-mono">{r.tts_selling}</td>
+                              <td><button className="btn btn-danger-soft btn-sm" onClick={() => deleteRate(r.id)}>Delete</button></td>
                             </tr>
                           ))}
                         </tbody>
