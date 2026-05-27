@@ -8,8 +8,16 @@ import httpx
 import pdfplumber
 
 DATE_PATTERNS = [
+    # "27 May 2026", "27-May-2026", "27/May/2026"
     re.compile(r"(\d{1,2})[\-/\s]([A-Za-z]{3,9})[\-/\s](\d{4})"),
+    # "2026-05-27"
     re.compile(r"(\d{4})-(\d{2})-(\d{2})"),
+    # "27/05/2026", "27-05-2026", "27.05.2026"
+    re.compile(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})"),
+    # "May 27, 2026" or "May 27 2026"
+    re.compile(r"([A-Za-z]{3,9})\s+(\d{1,2})[,\s]+(\d{4})"),
+    # "27TH MAY, 2026" / "27th May 2026" / "27 th May 2026" (ordinal, superscript-safe)
+    re.compile(r"(\d{1,2})\s*(?:ST|ND|RD|TH|st|nd|rd|th)[,\s]+([A-Za-z]{3,9})[,\s]+(\d{4})"),
 ]
 
 
@@ -84,16 +92,39 @@ def _parse_date(text: str):
         match = pattern.search(text)
         if not match:
             continue
-        groups = match.groups()
+        g = match.groups()
+        candidates = []
         try:
-            if len(groups[0]) == 4:
-                return datetime.strptime("-".join(groups), "%Y-%m-%d").date()
-            return datetime.strptime(" ".join(groups), "%d %B %Y").date()
-        except ValueError:
-            try:
-                return datetime.strptime(" ".join(groups), "%d %b %Y").date()
-            except ValueError:
-                continue
+            if len(g[0]) == 4:
+                # YYYY-MM-DD
+                candidates.append(datetime.strptime(f"{g[0]}-{g[1]}-{g[2]}", "%Y-%m-%d").date())
+            elif g[0].isalpha():
+                # Month DD YYYY
+                for fmt in ("%B %d %Y", "%b %d %Y"):
+                    try:
+                        candidates.append(datetime.strptime(f"{g[0]} {g[1]} {g[2]}", fmt).date())
+                        break
+                    except ValueError:
+                        pass
+            elif g[1].isalpha():
+                # DD Month YYYY  (original pattern + ordinal pattern)
+                for fmt in ("%d %B %Y", "%d %b %Y"):
+                    try:
+                        candidates.append(datetime.strptime(f"{g[0]} {g[1]} {g[2]}", fmt).date())
+                        break
+                    except ValueError:
+                        pass
+            else:
+                # DD/MM/YYYY — assume day-first (Ghanaian bank convention)
+                try:
+                    candidates.append(datetime.strptime(f"{g[0]}/{g[1]}/{g[2]}", "%d/%m/%Y").date())
+                except ValueError:
+                    pass
+        except (ValueError, IndexError):
+            pass
+        for d in candidates:
+            if d.year >= 2000:
+                return d
     raise PdfParseError("Could not find/parse rate date from PDF text")
 
 
@@ -101,50 +132,80 @@ def _to_num(raw: str) -> float:
     return float(raw.replace(",", "").strip())
 
 
+def _parse_from_path(pdf_path: Path, target_code: str) -> dict:
+    """Core parsing logic — operates on a local file path."""
+    code = target_code.upper().strip()
+    with pdfplumber.open(pdf_path) as pdf:
+        text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+        rate_date = _parse_date(text)
+
+        for page in pdf.pages:
+            tables = page.extract_tables() or []
+            for table in tables:
+                for row in table:
+                    if not row:
+                        continue
+                    normalized = [str(col).strip() if col else "" for col in row]
+                    extracted = _extract_rates_from_row(normalized, code)
+                    if extracted:
+                        return {"rate_date": rate_date, **extracted}
+
+        extracted = _extract_rates_from_text(text, code)
+        if extracted:
+            return {"rate_date": rate_date, **extracted}
+
+        ocr_text = _extract_text_via_ocr(pdf_path)
+        if ocr_text:
+            try:
+                ocr_date = _parse_date(ocr_text)
+            except PdfParseError:
+                ocr_date = rate_date
+            extracted = _extract_rates_from_text(ocr_text, code)
+            if extracted:
+                return {"rate_date": ocr_date, **extracted}
+
+    raise PdfParseError(f"Could not find {code} rates in PDF table, text, or OCR fallback")
+
+
 def parse_bank_pdf_rates(source_url: str, target_code: str = "USD") -> dict:
     code = target_code.upper().strip()
     if not code:
         raise PdfParseError("target_code is required")
 
-    response = httpx.get(source_url, timeout=30.0)
+    response = httpx.get(
+        source_url,
+        timeout=30.0,
+        follow_redirects=True,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
+        },
+    )
     response.raise_for_status()
     with tempfile.NamedTemporaryFile(prefix="fx_source_", suffix=".pdf", delete=False) as tmp_file:
         tmp_file.write(response.content)
         temp_path = Path(tmp_file.name)
 
     try:
-        with pdfplumber.open(temp_path) as pdf:
-            text = "\n".join((page.extract_text() or "") for page in pdf.pages)
-            rate_date = _parse_date(text)
-
-            # Strategy 1: table extraction (preferred)
-            for page in pdf.pages:
-                tables = page.extract_tables() or []
-                for table in tables:
-                    for row in table:
-                        if not row:
-                            continue
-                        normalized = [str(col).strip() if col else "" for col in row]
-                        extracted = _extract_rates_from_row(normalized, code)
-                        if extracted:
-                            return {"rate_date": rate_date, **extracted}
-
-            # Strategy 2: plain-text fallback for non-tabular PDF layouts
-            extracted = _extract_rates_from_text(text, code)
-            if extracted:
-                return {"rate_date": rate_date, **extracted}
-
-            # Strategy 3: OCR fallback for scanned/image PDFs
-            ocr_text = _extract_text_via_ocr(temp_path)
-            if ocr_text:
-                try:
-                    ocr_date = _parse_date(ocr_text)
-                except PdfParseError:
-                    ocr_date = rate_date
-                extracted = _extract_rates_from_text(ocr_text, code)
-                if extracted:
-                    return {"rate_date": ocr_date, **extracted}
+        return _parse_from_path(temp_path, code)
     finally:
         temp_path.unlink(missing_ok=True)
 
-    raise PdfParseError(f"Could not find {code} rates in PDF table, text, or OCR fallback")
+
+def parse_uploaded_pdf(pdf_bytes: bytes, target_code: str = "USD") -> dict:
+    """Parse rates from raw PDF bytes (file upload path)."""
+    code = target_code.upper().strip()
+    if not code:
+        raise PdfParseError("target_code is required")
+
+    with tempfile.NamedTemporaryFile(prefix="fx_upload_", suffix=".pdf", delete=False) as tmp_file:
+        tmp_file.write(pdf_bytes)
+        temp_path = Path(tmp_file.name)
+
+    try:
+        return _parse_from_path(temp_path, code)
+    finally:
+        temp_path.unlink(missing_ok=True)
