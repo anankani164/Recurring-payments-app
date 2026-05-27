@@ -1,0 +1,150 @@
+import re
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import httpx
+import pdfplumber
+
+DATE_PATTERNS = [
+    re.compile(r"(\d{1,2})[\-/\s]([A-Za-z]{3,9})[\-/\s](\d{4})"),
+    re.compile(r"(\d{4})-(\d{2})-(\d{2})"),
+]
+
+
+class PdfParseError(ValueError):
+    pass
+
+
+def _extract_text_via_ocr(pdf_path: Path) -> Optional[str]:
+    """
+    Optional OCR fallback for scanned/image-only PDFs.
+    Requires pytesseract and a working tesseract binary in the runtime image.
+    """
+    try:
+        import pytesseract  # type: ignore
+    except Exception:  # noqa: BLE001
+        return None
+
+    chunks: list[str] = []
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                page_img = page.to_image(resolution=200).original
+                text = pytesseract.image_to_string(page_img) or ""
+                if text.strip():
+                    chunks.append(text)
+    except Exception:  # noqa: BLE001
+        return None
+
+    combined = "\n".join(chunks).strip()
+    return combined or None
+
+
+def _extract_rates_from_row(normalized: list[str], code: str) -> dict | None:
+    if code not in normalized:
+        return None
+    code_index = normalized.index(code)
+    if code_index + 4 >= len(normalized):
+        return None
+    try:
+        return {
+            "code": code,
+            "cash_buying": _to_num(normalized[code_index + 1]),
+            "cash_selling": _to_num(normalized[code_index + 2]),
+            "tts_buying": _to_num(normalized[code_index + 3]),
+            "tts_selling": _to_num(normalized[code_index + 4]),
+        }
+    except ValueError:
+        return None
+
+
+def _extract_rates_from_text(text: str, code: str) -> dict | None:
+    # Handles layouts where table extraction fails but rows are present in plain text.
+    # Example row: "US DOLLAR USD 10.1 10.2 10.3 10.4"
+    pattern = re.compile(
+        rf"\b{re.escape(code)}\b\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)"
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+    values = match.groups()
+    return {
+        "code": code,
+        "cash_buying": _to_num(values[0]),
+        "cash_selling": _to_num(values[1]),
+        "tts_buying": _to_num(values[2]),
+        "tts_selling": _to_num(values[3]),
+    }
+
+
+def _parse_date(text: str):
+    for pattern in DATE_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        groups = match.groups()
+        try:
+            if len(groups[0]) == 4:
+                return datetime.strptime("-".join(groups), "%Y-%m-%d").date()
+            return datetime.strptime(" ".join(groups), "%d %B %Y").date()
+        except ValueError:
+            try:
+                return datetime.strptime(" ".join(groups), "%d %b %Y").date()
+            except ValueError:
+                continue
+    raise PdfParseError("Could not find/parse rate date from PDF text")
+
+
+def _to_num(raw: str) -> float:
+    return float(raw.replace(",", "").strip())
+
+
+def parse_bank_pdf_rates(source_url: str, target_code: str = "USD") -> dict:
+    code = target_code.upper().strip()
+    if not code:
+        raise PdfParseError("target_code is required")
+
+    response = httpx.get(source_url, timeout=30.0)
+    response.raise_for_status()
+    with tempfile.NamedTemporaryFile(prefix="fx_source_", suffix=".pdf", delete=False) as tmp_file:
+        tmp_file.write(response.content)
+        temp_path = Path(tmp_file.name)
+
+    try:
+        with pdfplumber.open(temp_path) as pdf:
+            text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+            rate_date = _parse_date(text)
+
+            # Strategy 1: table extraction (preferred)
+            for page in pdf.pages:
+                tables = page.extract_tables() or []
+                for table in tables:
+                    for row in table:
+                        if not row:
+                            continue
+                        normalized = [str(col).strip() if col else "" for col in row]
+                        extracted = _extract_rates_from_row(normalized, code)
+                        if extracted:
+                            return {"rate_date": rate_date, **extracted}
+
+            # Strategy 2: plain-text fallback for non-tabular PDF layouts
+            extracted = _extract_rates_from_text(text, code)
+            if extracted:
+                return {"rate_date": rate_date, **extracted}
+
+            # Strategy 3: OCR fallback for scanned/image PDFs
+            ocr_text = _extract_text_via_ocr(temp_path)
+            if ocr_text:
+                try:
+                    ocr_date = _parse_date(ocr_text)
+                except PdfParseError:
+                    ocr_date = rate_date
+                extracted = _extract_rates_from_text(ocr_text, code)
+                if extracted:
+                    return {"rate_date": ocr_date, **extracted}
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    raise PdfParseError(f"Could not find {code} rates in PDF table, text, or OCR fallback")
