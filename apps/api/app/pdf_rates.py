@@ -8,8 +8,16 @@ import httpx
 import pdfplumber
 
 DATE_PATTERNS = [
+    # "27 May 2026", "27-May-2026", "27/May/2026"
     re.compile(r"(\d{1,2})[\-/\s]([A-Za-z]{3,9})[\-/\s](\d{4})"),
+    # "2026-05-27"
     re.compile(r"(\d{4})-(\d{2})-(\d{2})"),
+    # "27/05/2026", "27-05-2026", "27.05.2026"
+    re.compile(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})"),
+    # "May 27, 2026" or "May 27 2026"
+    re.compile(r"([A-Za-z]{3,9})\s+(\d{1,2})[,\s]+(\d{4})"),
+    # "27TH MAY, 2026" / "27th May 2026" (ordinal)
+    re.compile(r"(\d{1,2})(?:ST|ND|RD|TH|st|nd|rd|th)[,\s]+([A-Za-z]{3,9})[,\s]+(\d{4})"),
 ]
 
 
@@ -84,16 +92,39 @@ def _parse_date(text: str):
         match = pattern.search(text)
         if not match:
             continue
-        groups = match.groups()
+        g = match.groups()
+        candidates = []
         try:
-            if len(groups[0]) == 4:
-                return datetime.strptime("-".join(groups), "%Y-%m-%d").date()
-            return datetime.strptime(" ".join(groups), "%d %B %Y").date()
-        except ValueError:
-            try:
-                return datetime.strptime(" ".join(groups), "%d %b %Y").date()
-            except ValueError:
-                continue
+            if len(g[0]) == 4:
+                # YYYY-MM-DD
+                candidates.append(datetime.strptime(f"{g[0]}-{g[1]}-{g[2]}", "%Y-%m-%d").date())
+            elif g[0].isalpha():
+                # Month DD YYYY
+                for fmt in ("%B %d %Y", "%b %d %Y"):
+                    try:
+                        candidates.append(datetime.strptime(f"{g[0]} {g[1]} {g[2]}", fmt).date())
+                        break
+                    except ValueError:
+                        pass
+            elif g[1].isalpha():
+                # DD Month YYYY  (original pattern + ordinal pattern)
+                for fmt in ("%d %B %Y", "%d %b %Y"):
+                    try:
+                        candidates.append(datetime.strptime(f"{g[0]} {g[1]} {g[2]}", fmt).date())
+                        break
+                    except ValueError:
+                        pass
+            else:
+                # DD/MM/YYYY — assume day-first (Ghanaian bank convention)
+                try:
+                    candidates.append(datetime.strptime(f"{g[0]}/{g[1]}/{g[2]}", "%d/%m/%Y").date())
+                except ValueError:
+                    pass
+        except (ValueError, IndexError):
+            pass
+        for d in candidates:
+            if d.year >= 2000:
+                return d
     raise PdfParseError("Could not find/parse rate date from PDF text")
 
 

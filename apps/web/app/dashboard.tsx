@@ -252,7 +252,8 @@ export default function Dashboard() {
     const res = await fetch(`${apiBase}/rates/upload-pdf`, { method: 'POST', headers: authHeaders, body: formData })
     if (!res.ok) {
       const detail = await res.json().catch(() => null)
-      return err(detail?.detail ?? 'Could not process uploaded PDF')
+      const msg = detail?.detail ?? 'Could not process uploaded PDF'
+      return err(`${msg}. If the PDF format is not recognised, use "Add Rate Manually" instead.`)
     }
     setPdfFile(null); ok('Rate extracted from PDF'); await loadData()
   }
