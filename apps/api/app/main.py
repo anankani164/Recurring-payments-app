@@ -289,7 +289,10 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
     client = db.get(Client, payload.client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    project = Project(**payload.model_dump())
+    data = payload.model_dump()
+    if data.get('rate_source_url') is not None:
+        data['rate_source_url'] = str(data['rate_source_url'])
+    project = Project(**data)
     db.add(project)
     db.commit()
     db.refresh(project)

@@ -220,7 +220,10 @@ export default function Dashboard() {
         next_invoice_date: nextDate
       }),
     })
-    if (!res.ok) return err('Could not create project')
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      return err(detail?.detail ?? 'Could not create project')
+    }
     setProjectName(''); setProjectClientId(''); setAmountUsd(''); setNextDate(''); setRateType('tts_selling')
     setBillingCurrency('USD'); setAmountGhs(''); setRateSourceUrl('')
     ok('Project created'); await loadData()
