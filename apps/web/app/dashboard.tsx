@@ -91,6 +91,7 @@ export default function Dashboard() {
   const [billingCurrency, setBillingCurrency] = useState('USD')
   const [amountGhs,       setAmountGhs]       = useState('')
   const [rateSourceUrl,   setRateSourceUrl]   = useState('')
+  const [recurrence,      setRecurrence]      = useState('monthly')
 
   const [pdfUrl,    setPdfUrl]    = useState('')
   const [pdfFile,   setPdfFile]   = useState<File | null>(null)
@@ -215,7 +216,7 @@ export default function Dashboard() {
         amount_usd: billingCurrency === 'USD' ? Number(amountUsd) : 0,
         amount_ghs: billingCurrency === 'GHS' ? Number(amountGhs) : undefined,
         rate_source_url: billingCurrency === 'USD' && rateSourceUrl ? rateSourceUrl : undefined,
-        recurrence: 'monthly',
+        recurrence: recurrence,
         rate_type: rateType,
         next_invoice_date: nextDate
       }),
@@ -225,7 +226,7 @@ export default function Dashboard() {
       return err(detail?.detail ?? 'Could not create project')
     }
     setProjectName(''); setProjectClientId(''); setAmountUsd(''); setNextDate(''); setRateType('tts_selling')
-    setBillingCurrency('USD'); setAmountGhs(''); setRateSourceUrl('')
+    setBillingCurrency('USD'); setAmountGhs(''); setRateSourceUrl(''); setRecurrence('monthly')
     ok('Project created'); await loadData()
   }
 
@@ -443,12 +444,12 @@ export default function Dashboard() {
                       <tbody>
                         {invoices.slice(0, 10).map(inv => (
                           <tr key={inv.id}>
-                            <td className="td-mono">{inv.invoice_date}</td>
-                            <td>{projects.find(p => p.id === inv.project_id)?.name ?? `#${inv.project_id}`}</td>
-                            <td className="td-mono">${inv.amount_usd.toFixed(2)}</td>
-                            <td className="td-mono">{inv.fx_rate}</td>
-                            <td className="td-mono">GHS {inv.amount_ghs.toFixed(2)}</td>
-                            <td><span className="badge badge-grey">{inv.rate_type}</span></td>
+                            <td data-label="Date" className="td-mono">{inv.invoice_date}</td>
+                            <td data-label="Project">{projects.find(p => p.id === inv.project_id)?.name ?? `#${inv.project_id}`}</td>
+                            <td data-label="USD" className="td-mono">${inv.amount_usd.toFixed(2)}</td>
+                            <td data-label="FX Rate" className="td-mono">{inv.fx_rate}</td>
+                            <td data-label="GHS" className="td-mono">GHS {inv.amount_ghs.toFixed(2)}</td>
+                            <td data-label="Type"><span className="badge badge-grey">{inv.rate_type}</span></td>
                           </tr>
                         ))}
                       </tbody>
@@ -498,9 +499,9 @@ export default function Dashboard() {
                           {pagedClients.map(c => (
                             <tr key={c.id}>
                               <td className="td-id">{c.id}</td>
-                              <td><strong>{c.name}</strong></td>
-                              <td style={{ color: 'var(--text-muted)' }}>{c.email}</td>
-                              <td style={{ textAlign: 'right' }}>
+                              <td data-label="Name"><strong>{c.name}</strong></td>
+                              <td data-label="Email" style={{ color: 'var(--text-muted)' }}>{c.email}</td>
+                              <td data-label="" style={{ textAlign: 'right' }}>
                                 <button className="btn btn-danger-soft btn-sm" onClick={() => deleteClient(c.id)}>Delete</button>
                               </td>
                             </tr>
@@ -567,7 +568,7 @@ export default function Dashboard() {
                   <div className="form-row-3">
                     <div className="form-group">
                       <label className="form-label">Recurrence</label>
-                      <select className="select" value="monthly" disabled>
+                      <select className="select" value={recurrence} onChange={e => setRecurrence(e.target.value)}>
                         <option value="weekly">Weekly</option>
                         <option value="biweekly">Biweekly</option>
                         <option value="monthly">Monthly</option>
@@ -599,17 +600,17 @@ export default function Dashboard() {
                   <>
                     <div className="table-wrap">
                       <table>
-                        <thead><tr><th>#</th><th>Name</th><th>Client</th><th>USD / mo</th><th>Rate Type</th><th>Next Invoice</th><th></th></tr></thead>
+                        <thead><tr><th>#</th><th>Name</th><th>Client</th><th>Amount</th><th>Rate Type</th><th>Next Invoice</th><th></th></tr></thead>
                         <tbody>
                           {pagedProjects.map(p => (
                             <tr key={p.id}>
                               <td className="td-id">{p.id}</td>
-                              <td><strong>{p.name}</strong></td>
-                              <td style={{ color: 'var(--text-muted)' }}>{clients.find(c => c.id === p.client_id)?.name ?? `#${p.client_id}`}</td>
-                              <td className="td-mono">${p.amount_usd.toFixed(2)}</td>
-                              <td><span className="badge badge-grey">{p.rate_type}</span></td>
-                              <td className="td-mono" style={{ color: new Date(p.next_invoice_date) <= new Date() ? 'var(--danger)' : 'var(--text)' }}>{p.next_invoice_date}</td>
-                              <td style={{ textAlign: 'right' }}>
+                              <td data-label="Name"><strong>{p.name}</strong></td>
+                              <td data-label="Client" style={{ color: 'var(--text-muted)' }}>{clients.find(c => c.id === p.client_id)?.name ?? `#${p.client_id}`}</td>
+                              <td data-label="Amount" className="td-mono">{p.billing_currency === 'GHS' ? `GHS ${(p.amount_ghs ?? 0).toFixed(2)}` : `$${p.amount_usd.toFixed(2)}`}</td>
+                              <td data-label="Rate Type"><span className="badge badge-grey">{p.rate_type}</span></td>
+                              <td data-label="Next Invoice" className="td-mono" style={{ color: new Date(p.next_invoice_date) <= new Date() ? 'var(--danger)' : 'var(--text)' }}>{p.next_invoice_date}</td>
+                              <td data-label="" style={{ textAlign: 'right' }}>
                                 <button className="btn btn-danger-soft btn-sm" onClick={() => deleteProject(p.id)}>Delete</button>
                               </td>
                             </tr>
@@ -730,13 +731,13 @@ export default function Dashboard() {
                         <tbody>
                           {pagedRates.map(r => (
                             <tr key={r.id}>
-                              <td className="td-mono">{r.rate_date}</td>
-                              <td><span className="badge badge-blue">{r.code}</span></td>
-                              <td className="td-mono">{r.cash_buying}</td>
-                              <td className="td-mono">{r.cash_selling}</td>
-                              <td className="td-mono">{r.tts_buying}</td>
-                              <td className="td-mono">{r.tts_selling}</td>
-                              <td><button className="btn btn-danger-soft btn-sm" onClick={() => deleteRate(r.id)}>Delete</button></td>
+                              <td data-label="Date" className="td-mono">{r.rate_date}</td>
+                              <td data-label="Code"><span className="badge badge-blue">{r.code}</span></td>
+                              <td data-label="Cash Buy" className="td-mono">{r.cash_buying}</td>
+                              <td data-label="Cash Sell" className="td-mono">{r.cash_selling}</td>
+                              <td data-label="TTS Buy" className="td-mono">{r.tts_buying}</td>
+                              <td data-label="TTS Sell" className="td-mono">{r.tts_selling}</td>
+                              <td data-label=""><button className="btn btn-danger-soft btn-sm" onClick={() => deleteRate(r.id)}>Delete</button></td>
                             </tr>
                           ))}
                         </tbody>
@@ -795,17 +796,17 @@ export default function Dashboard() {
                           {pagedInvoices.map(inv => (
                             <tr key={inv.id}>
                               <td className="td-id">{inv.id}</td>
-                              <td className="td-mono">{inv.invoice_date}</td>
-                              <td>{projects.find(p => p.id === inv.project_id)?.name ?? `#${inv.project_id}`}</td>
-                              <td className="td-mono">${inv.amount_usd.toFixed(2)}</td>
-                              <td className="td-mono">{inv.fx_rate}</td>
-                              <td className="td-mono">GHS {inv.amount_ghs.toFixed(2)}</td>
-                              <td><span className="badge badge-grey">{inv.rate_type}</span></td>
-                              <td>
+                              <td data-label="Date" className="td-mono">{inv.invoice_date}</td>
+                              <td data-label="Project">{projects.find(p => p.id === inv.project_id)?.name ?? `#${inv.project_id}`}</td>
+                              <td data-label="USD" className="td-mono">${inv.amount_usd.toFixed(2)}</td>
+                              <td data-label="FX Rate" className="td-mono">{inv.fx_rate}</td>
+                              <td data-label="GHS" className="td-mono">GHS {inv.amount_ghs.toFixed(2)}</td>
+                              <td data-label="Type"><span className="badge badge-grey">{inv.rate_type}</span></td>
+                              <td data-label="Status">
                                 <span className={`badge ${inv.status === 'completed' ? 'badge-green' : 'badge-yellow'}`}>{inv.status}</span>
                               </td>
-                              <td>
-                                <div style={{ display: 'flex', gap: 6 }}>
+                              <td data-label="">
+                                <div className="invoice-actions" style={{ display: 'flex', gap: 6 }}>
                                   {inv.status === 'pending' && (
                                     <button className="btn btn-secondary btn-sm" onClick={() => markInvoiceComplete(inv.id)}>Mark Complete</button>
                                   )}
@@ -850,10 +851,10 @@ export default function Dashboard() {
                         <tbody>
                           {pagedJobs.map(j => (
                             <tr key={j.id}>
-                              <td className="td-mono" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(j.created_at).toLocaleString()}</td>
-                              <td><span className="badge badge-grey">{j.job_name}</span></td>
-                              <td><StatusBadge status={j.status} /></td>
-                              <td style={{ color: 'var(--text-muted)', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.message}</td>
+                              <td data-label="Time" className="td-mono" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(j.created_at).toLocaleString()}</td>
+                              <td data-label="Job"><span className="badge badge-grey">{j.job_name}</span></td>
+                              <td data-label="Status"><StatusBadge status={j.status} /></td>
+                              <td data-label="Message" style={{ color: 'var(--text-muted)', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.message}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -918,13 +919,13 @@ export default function Dashboard() {
                             <Fragment key={u.id}>
                               <tr>
                                 <td className="td-id">{u.id}</td>
-                                <td><strong>{u.username}</strong></td>
-                                <td style={{ color: 'var(--text-muted)' }}>{u.email}</td>
-                                <td><RoleBadge role={u.role} /></td>
-                                <td>
+                                <td data-label="Username"><strong>{u.username}</strong></td>
+                                <td data-label="Email" style={{ color: 'var(--text-muted)' }}>{u.email}</td>
+                                <td data-label="Role"><RoleBadge role={u.role} /></td>
+                                <td data-label="Status">
                                   <span className={`badge ${u.is_active ? 'badge-green' : 'badge-grey'}`}>{u.is_active ? 'Active' : 'Inactive'}</span>
                                 </td>
-                                <td>
+                                <td data-label="">
                                   <div style={{ display: 'flex', gap: 6 }}>
                                     <button className="btn btn-secondary btn-sm" onClick={() => setEditingUser(editingUser === u.id ? null : u.id)}>
                                       {editingUser === u.id ? 'Cancel' : 'Edit'}

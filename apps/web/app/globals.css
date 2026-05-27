@@ -301,11 +301,91 @@ tbody tr:hover td { background: var(--surface-2); }
 .bottom-nav-btn .bnav-icon { font-size: 18px; line-height: 1; }
 .bottom-nav-btn .bnav-label { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ── Responsive ──────────────────────────────────────── */
+/* ── Responsive: tablet ──────────────────────────────── */
 @media (max-width: 860px) {
   .sidebar { display: none; }
-  .content { padding: 16px 14px 80px; }
+  .content { padding: 16px 14px calc(76px + env(safe-area-inset-bottom, 0px)); }
   .form-row, .form-row-3 { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: 1fr 1fr; }
   .bottom-nav { display: block; }
+  .page-title { font-size: 18px; }
+}
+
+/* ── Responsive: mobile ──────────────────────────────── */
+@media (max-width: 560px) {
+  /* Header */
+  .header { padding: 0 14px; }
+  .logo-text { display: none; }
+  .header-right { gap: 8px; }
+
+  /* Inputs / buttons — touch targets */
+  .input, .select { min-height: 44px; font-size: 16px; /* prevent iOS zoom */ }
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 34px; }
+
+  /* Stats */
+  .stats-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat-value { font-size: 24px; }
+
+  /* Cards */
+  .card { padding: 14px 14px; }
+
+  /* ── Responsive tables → card layout ── */
+  .table-wrap { margin: 0 -2px; overflow-x: visible; }
+  .table-wrap table { display: block; }
+  .table-wrap thead { display: none; }
+  .table-wrap tbody { display: flex; flex-direction: column; gap: 8px; }
+  .table-wrap tr {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .table-wrap tbody tr:hover td { background: transparent; }
+  .table-wrap td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    gap: 10px;
+    min-height: unset;
+  }
+  .table-wrap tr td:last-child { border-bottom: none; }
+  .table-wrap td::before {
+    content: attr(data-label);
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 72px;
+  }
+  /* Actions cell — no label, right-aligned, wrapping buttons */
+  .table-wrap td[data-label=""] {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+  }
+  .table-wrap td[data-label=""]::before { display: none; }
+  /* Hide the numeric ID cell on mobile to save space */
+  .table-wrap td.td-id { display: none; }
+
+  /* Invoice actions — stack if needed */
+  .invoice-actions { flex-wrap: wrap; }
+
+  /* Bottom nav — 7 items */
+  .bottom-nav-btn { padding: 7px 2px 9px; }
+  .bottom-nav-btn .bnav-icon { font-size: 16px; }
+  .bottom-nav-btn .bnav-label { font-size: 9px; }
+
+  /* Edit row */
+  .edit-row { flex-direction: column; align-items: flex-start; }
 }
