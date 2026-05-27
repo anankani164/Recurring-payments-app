@@ -3,318 +3,707 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 type Client = { id: number; name: string; email: string }
-type Project = {
-  id: number
-  name: string
-  client_id: number
-  amount_usd: number
-  recurrence: string
-  rate_type: string
-  next_invoice_date: string
-}
-type FxRate = {
-  id: number
-  rate_date: string
-  code: string
-  cash_buying: number
-  cash_selling: number
-  tts_buying: number
-  tts_selling: number
-  source_url: string
-}
-type Invoice = {
-  id: number
-  project_id: number
-  invoice_date: string
-  amount_usd: number
-  fx_rate: number
-  amount_ghs: number
-  rate_type: string
-  source_rate_date: string
-}
+type Project = { id: number; name: string; client_id: number; amount_usd: number; recurrence: string; rate_type: string; next_invoice_date: string }
+type FxRate = { id: number; rate_date: string; code: string; cash_buying: number; cash_selling: number; tts_buying: number; tts_selling: number; source_url: string }
+type Invoice = { id: number; project_id: number; invoice_date: string; amount_usd: number; fx_rate: number; amount_ghs: number; rate_type: string; source_rate_date: string }
 type JobLog = { id: number; job_name: string; status: string; message: string; created_at: string }
-type Health = { status: string }
 type User = { id: number; username: string; email: string; role: string; is_active: boolean }
+type Tab = 'overview' | 'clients' | 'projects' | 'rates' | 'invoices' | 'jobs' | 'users'
 
-const rateTypes = ['cash_buying', 'cash_selling', 'tts_buying', 'tts_selling']
-const userRoles = ['admin', 'user']
+const PAGE_SIZE = 8
+const RATE_TYPES = ['cash_buying', 'cash_selling', 'tts_buying', 'tts_selling']
+const USER_ROLES = ['admin', 'user']
+
+const NAV: { id: Tab; label: string; icon: string }[] = [
+  { id: 'overview',  label: 'Overview',  icon: '◈' },
+  { id: 'clients',   label: 'Clients',   icon: '⊙' },
+  { id: 'projects',  label: 'Projects',  icon: '▦' },
+  { id: 'rates',     label: 'FX Rates',  icon: '⇄' },
+  { id: 'invoices',  label: 'Invoices',  icon: '◻' },
+  { id: 'jobs',      label: 'Job Logs',  icon: '◉' },
+  { id: 'users',     label: 'Users',     icon: '◐' },
+]
+
+function Pagination({ page, pages, onPrev, onNext }: { page: number; pages: number; onPrev: () => void; onNext: () => void }) {
+  return (
+    <div className="pagination">
+      <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={onPrev}>← Prev</button>
+      <span>Page {page} of {pages}</span>
+      <button className="btn btn-ghost btn-sm" disabled={page >= pages} onClick={onNext}>Next →</button>
+    </div>
+  )
+}
+
+function Empty({ label }: { label: string }) {
+  return (
+    <div className="empty">
+      <div className="empty-icon">○</div>
+      No {label} yet
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const cls = status === 'success' ? 'badge-green' : status === 'failed' ? 'badge-red' : status === 'started' ? 'badge-yellow' : 'badge-grey'
+  return <span className={`badge ${cls}`}>{status}</span>
+}
+
+function RoleBadge({ role }: { role: string }) {
+  const cls = role === 'superadmin' ? 'badge-red' : role === 'admin' ? 'badge-yellow' : 'badge-grey'
+  return <span className={`badge ${cls}`}>{role}</span>
+}
 
 export default function Dashboard() {
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || ''
 
-  const [health, setHealth] = useState('checking...')
-  const [token, setToken] = useState('')
+  const [health, setHealth]   = useState('checking…')
+  const [token, setToken]     = useState('')
+  const [tab, setTab]         = useState<Tab>('overview')
+  const [msg, setMsg]         = useState('')
+  const [msgOk, setMsgOk]     = useState(true)
+
   const [username, setUsername] = useState('superadmin')
   const [password, setPassword] = useState('')
 
-  const headers = useMemo(
-    () => ({ 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }),
-    [token],
-  )
-
-  const [clients, setClients] = useState<Client[]>([])
+  const [clients,  setClients]  = useState<Client[]>([])
   const [projects, setProjects] = useState<Project[]>([])
-  const [rates, setRates] = useState<FxRate[]>([])
+  const [rates,    setRates]    = useState<FxRate[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
-  const [jobs, setJobs] = useState<JobLog[]>([])
-  const [users, setUsers] = useState<User[]>([])
-  const [editingUser, setEditingUser] = useState<number | null>(null)
+  const [jobs,     setJobs]     = useState<JobLog[]>([])
+  const [users,    setUsers]    = useState<User[]>([])
 
-  const [clientName, setClientName] = useState('')
+  const [clientName,  setClientName]  = useState('')
   const [clientEmail, setClientEmail] = useState('')
-  const [projectName, setProjectName] = useState('')
+
+  const [projectName,     setProjectName]     = useState('')
   const [projectClientId, setProjectClientId] = useState('')
-  const [amountUsd, setAmountUsd] = useState('')
-  const [nextDate, setNextDate] = useState('')
-  const [rateType, setRateType] = useState('tts_selling')
-  const [message, setMessage] = useState('')
-  const [messageType, setMessageType] = useState<'ok' | 'err'>('ok')
+  const [amountUsd,       setAmountUsd]       = useState('')
+  const [nextDate,        setNextDate]        = useState('')
+  const [rateType,        setRateType]        = useState('tts_selling')
+
   const [pdfUrl, setPdfUrl] = useState('')
 
   const [newUsername, setNewUsername] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
   const [newUserRole, setNewUserRole] = useState('user')
-  const [clientPage, setClientPage] = useState(1)
+  const [editingUser, setEditingUser] = useState<number | null>(null)
+
+  const [clientPage,  setClientPage]  = useState(1)
   const [projectPage, setProjectPage] = useState(1)
-  const [userPage, setUserPage] = useState(1)
-  const pageSize = 5
+  const [userPage,    setUserPage]    = useState(1)
+  const [invoicePage, setInvoicePage] = useState(1)
+  const [ratePage,    setRatePage]    = useState(1)
+  const [jobPage,     setJobPage]     = useState(1)
+
+  const headers = useMemo(
+    () => ({ 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }),
+    [token],
+  )
+
+  const ok  = (m: string) => { setMsgOk(true);  setMsg(m) }
+  const err = (m: string) => { setMsgOk(false); setMsg(m) }
 
   const loadData = async () => {
     if (!token) return
     try {
-      const [cRes, pRes, rRes, iRes, jRes, uRes] = await Promise.all([
-        fetch(`${apiBase}/clients`, { headers }),
+      const [cR, pR, rR, iR, jR, uR] = await Promise.all([
+        fetch(`${apiBase}/clients`,  { headers }),
         fetch(`${apiBase}/projects`, { headers }),
-        fetch(`${apiBase}/rates`, { headers }),
+        fetch(`${apiBase}/rates`,    { headers }),
         fetch(`${apiBase}/invoices`, { headers }),
-        fetch(`${apiBase}/jobs`, { headers }),
-        fetch(`${apiBase}/users`, { headers }),
+        fetch(`${apiBase}/jobs`,     { headers }),
+        fetch(`${apiBase}/users`,    { headers }),
       ])
-      if (cRes.ok) setClients(await cRes.json())
-      if (pRes.ok) setProjects(await pRes.json())
-      if (rRes.ok) setRates(await rRes.json())
-      if (iRes.ok) setInvoices(await iRes.json())
-      if (jRes.ok) setJobs(await jRes.json())
-      if (uRes.ok) setUsers(await uRes.json())
-    } catch {
-      setMessageType('err')
-      setMessage('Failed to load data from API')
-    }
+      if (cR.ok) setClients(await cR.json())
+      if (pR.ok) setProjects(await pR.json())
+      if (rR.ok) setRates(await rR.json())
+      if (iR.ok) setInvoices(await iR.json())
+      if (jR.ok) setJobs(await jR.json())
+      if (uR.ok) setUsers(await uR.json())
+    } catch { err('Failed to load data from API') }
   }
 
   useEffect(() => {
-    fetch(`${apiBase}/health`)
-      .then((r) => r.json() as Promise<Health>)
-      .then((d) => setHealth(d.status))
-      .catch(() => setHealth('unreachable'))
+    fetch(`${apiBase}/health`).then(r => r.json()).then(d => setHealth(d.status)).catch(() => setHealth('unreachable'))
   }, [apiBase])
 
   useEffect(() => { loadData() }, [token])
 
   const login = async (e: FormEvent) => {
-    e.preventDefault()
-    setMessage('')
+    e.preventDefault(); setMsg('')
     const res = await fetch(`${apiBase}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     })
-    if (!res.ok) { setMessageType('err'); return setMessage('Login failed. Check username/password.') }
+    if (!res.ok) return err('Login failed — check username / password')
     const data = await res.json()
-    setToken(data.access_token)
-    setPassword('')
-    setMessageType('ok')
-    setMessage('Logged in successfully')
+    setToken(data.access_token); setPassword('')
+    ok('Signed in successfully')
   }
 
   const createUser = async (e: FormEvent) => {
-    e.preventDefault()
-    setMessage('')
-    if (newUserPassword.length < 8) { setMessageType('err'); return setMessage('Password must be at least 8 characters') }
+    e.preventDefault(); setMsg('')
+    if (newUserPassword.length < 8) return err('Password must be at least 8 characters')
     const res = await fetch(`${apiBase}/users`, {
       method: 'POST', headers,
       body: JSON.stringify({ username: newUsername, email: newUserEmail, password: newUserPassword, role: newUserRole }),
     })
-    if (!res.ok) { setMessageType('err'); return setMessage('Could not create user (superadmin only)') }
+    if (!res.ok) return err('Could not create user')
     setNewUsername(''); setNewUserEmail(''); setNewUserPassword(''); setNewUserRole('user')
-    setMessageType('ok'); setMessage('User created')
-    await loadData()
+    ok('User created'); await loadData()
+  }
+
+  const updateUser = async (userId: number, payload: object) => {
+    const res = await fetch(`${apiBase}/users/${userId}`, { method: 'PATCH', headers, body: JSON.stringify(payload) })
+    if (!res.ok) return err('Failed to update user')
+    ok('User updated'); await loadData()
   }
 
   const addClient = async (e: FormEvent) => {
-    e.preventDefault(); setMessage('')
-    if (!clientName.trim()) { setMessageType('err'); return setMessage('Client name is required') }
+    e.preventDefault(); setMsg('')
+    if (!clientName.trim()) return err('Client name is required')
     const res = await fetch(`${apiBase}/clients`, { method: 'POST', headers, body: JSON.stringify({ name: clientName, email: clientEmail }) })
-    if (!res.ok) { setMessageType('err'); return setMessage('Could not create client') }
+    if (!res.ok) return err('Could not create client')
     setClientName(''); setClientEmail('')
     await loadData()
   }
 
+  const deleteClient = async (id: number) => {
+    const res = await fetch(`${apiBase}/clients/${id}`, { method: 'DELETE', headers })
+    if (!res.ok) return err('Could not delete client')
+    ok('Client deleted'); await loadData()
+  }
+
   const addProject = async (e: FormEvent) => {
-    e.preventDefault(); setMessage('')
-    if (!projectClientId) { setMessageType('err'); return setMessage('Please select a client for the project') }
-    if (!amountUsd || Number(amountUsd) <= 0) { setMessageType('err'); return setMessage('Amount USD must be greater than 0') }
-    if (!nextDate) { setMessageType('err'); return setMessage('Next invoice date is required') }
+    e.preventDefault(); setMsg('')
+    if (!projectClientId) return err('Please select a client')
+    if (!amountUsd || Number(amountUsd) <= 0) return err('Amount must be greater than 0')
+    if (!nextDate) return err('Next invoice date is required')
     const res = await fetch(`${apiBase}/projects`, {
       method: 'POST', headers,
       body: JSON.stringify({ name: projectName, client_id: Number(projectClientId), amount_usd: Number(amountUsd), recurrence: 'monthly', rate_type: rateType, next_invoice_date: nextDate }),
     })
-    if (!res.ok) { setMessageType('err'); return setMessage('Could not create project') }
+    if (!res.ok) return err('Could not create project')
     setProjectName(''); setProjectClientId(''); setAmountUsd(''); setNextDate(''); setRateType('tts_selling')
     await loadData()
   }
 
-  const ingestPdfRate = async (e: FormEvent) => {
-    e.preventDefault(); setMessage('')
-    if (!pdfUrl.startsWith('http://') && !pdfUrl.startsWith('https://')) { setMessageType('err'); return setMessage('PDF URL must start with http:// or https://') }
+  const deleteProject = async (id: number) => {
+    const res = await fetch(`${apiBase}/projects/${id}`, { method: 'DELETE', headers })
+    if (!res.ok) return err('Could not delete project')
+    ok('Project deleted'); await loadData()
+  }
+
+  const ingestPdf = async (e: FormEvent) => {
+    e.preventDefault(); setMsg('')
+    if (!pdfUrl.startsWith('http://') && !pdfUrl.startsWith('https://')) return err('URL must start with http:// or https://')
     const res = await fetch(`${apiBase}/rates/ingest-pdf`, { method: 'POST', headers, body: JSON.stringify({ source_url: pdfUrl, target_code: 'USD' }) })
-    if (!res.ok) { setMessageType('err'); return setMessage('Could not ingest PDF rate') }
-    setPdfUrl('')
-    await loadData()
+    if (!res.ok) return err('Could not ingest PDF rate')
+    setPdfUrl(''); ok('Rate ingested'); await loadData()
   }
 
   const runJobsNow = async () => {
-    setMessage('')
+    setMsg('')
     const res = await fetch(`${apiBase}/run-jobs-now`, { method: 'POST', headers })
-    if (!res.ok) { setMessageType('err'); return setMessage('Failed to run jobs') }
-    await loadData()
+    if (!res.ok) return err('Failed to run jobs')
+    ok('Jobs completed'); await loadData()
   }
 
-  const updateUser = async (userId: number, payload: { role?: string; is_active?: boolean }) => {
-    const res = await fetch(`${apiBase}/users/${userId}`, { method: 'PATCH', headers, body: JSON.stringify(payload) })
-    if (!res.ok) { setMessageType('err'); setMessage('Failed to update user'); return }
-    setMessageType('ok'); setMessage('User updated')
-    await loadData()
+  // Paged slices
+  const pagedClients  = clients.slice( (clientPage  - 1) * PAGE_SIZE, clientPage  * PAGE_SIZE)
+  const pagedProjects = projects.slice((projectPage - 1) * PAGE_SIZE, projectPage * PAGE_SIZE)
+  const pagedUsers    = users.slice(   (userPage    - 1) * PAGE_SIZE, userPage    * PAGE_SIZE)
+  const pagedInvoices = invoices.slice((invoicePage - 1) * PAGE_SIZE, invoicePage * PAGE_SIZE)
+  const pagedRates    = rates.slice(   (ratePage    - 1) * PAGE_SIZE, ratePage    * PAGE_SIZE)
+  const pagedJobs     = jobs.slice(    (jobPage     - 1) * PAGE_SIZE, jobPage     * PAGE_SIZE)
+
+  const clientPages  = Math.max(1, Math.ceil(clients.length  / PAGE_SIZE))
+  const projectPages = Math.max(1, Math.ceil(projects.length / PAGE_SIZE))
+  const userPages    = Math.max(1, Math.ceil(users.length    / PAGE_SIZE))
+  const invoicePages = Math.max(1, Math.ceil(invoices.length / PAGE_SIZE))
+  const ratePages    = Math.max(1, Math.ceil(rates.length    / PAGE_SIZE))
+  const jobPages     = Math.max(1, Math.ceil(jobs.length     / PAGE_SIZE))
+
+  // ── Login Screen ─────────────────────────────────────────────────────────
+  if (!token) {
+    return (
+      <div className="login-screen">
+        <div className="login-card">
+          <div className="login-brand">
+            <div className="login-brand-icon">R</div>
+            <div>
+              <div className="login-brand-name">Recurring Payments</div>
+              <div className="login-brand-sub">Admin Dashboard</div>
+            </div>
+          </div>
+          {msg && <div className={`alert ${msgOk ? 'alert-ok' : 'alert-err'}`}>{msg}</div>}
+          <h1 className="login-heading">Welcome back</h1>
+          <p className="login-sub">Sign in to your account to continue</p>
+          <form onSubmit={login} className="form-grid">
+            <div className="form-group">
+              <label className="form-label">Username</label>
+              <input className="input" value={username} onChange={e => setUsername(e.target.value)} required autoComplete="username" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
+            </div>
+            <button className="btn btn-primary" type="submit" style={{ marginTop: 4 }}>Sign In</button>
+          </form>
+          <div className="login-footer">
+            API status: <span className={health === 'ok' ? 'ok' : 'bad'}>{health}</span>
+          </div>
+        </div>
+      </div>
+    )
   }
 
-  const pagedClients = clients.slice((clientPage - 1) * pageSize, clientPage * pageSize)
-  const pagedProjects = projects.slice((projectPage - 1) * pageSize, projectPage * pageSize)
-  const pagedUsers = users.slice((userPage - 1) * pageSize, userPage * pageSize)
-  const clientPages = Math.max(1, Math.ceil(clients.length / pageSize))
-  const projectPages = Math.max(1, Math.ceil(projects.length / pageSize))
-  const userPages = Math.max(1, Math.ceil(users.length / pageSize))
-
+  // ── Main App ──────────────────────────────────────────────────────────────
   return (
-    <main style={{ fontFamily: 'sans-serif', padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-      <h1>Recurring Payments Dashboard</h1>
-      <p>API Health: {health}</p>
-      {message && <p style={{ color: messageType === 'err' ? 'crimson' : 'green' }}>{message}</p>}
+    <div className="app">
+      {/* Header */}
+      <header className="header">
+        <div className="header-logo">
+          <div className="logo-badge">R</div>
+          <span className="logo-text">Recurring Payments</span>
+        </div>
+        <div className="header-right">
+          <div className="api-status">
+            <span className={`status-dot ${health !== 'ok' ? 'bad' : ''}`} />
+            API {health}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setToken(''); setMsg('') }}>Sign out</button>
+        </div>
+      </header>
 
-      <section style={{ marginTop: 24 }}>
-        <h2>Login</h2>
-        <form onSubmit={login} style={{ display: 'grid', gap: 8 }}>
-          <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-          <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          <button type="submit">Login</button>
-        </form>
-      </section>
+      <div className="main-layout">
+        {/* Sidebar */}
+        <aside className="sidebar">
+          <div className="sidebar-group-label">Navigation</div>
+          {NAV.map(item => (
+            <button key={item.id} className={`nav-btn ${tab === item.id ? 'active' : ''}`} onClick={() => { setTab(item.id); setMsg('') }}>
+              <span className="nav-icon">{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </aside>
 
-      {token && (
-        <>
-          <section style={{ marginTop: 24 }}>
-            <h2>Superadmin: Create User</h2>
-            <form onSubmit={createUser} style={{ display: 'grid', gap: 8 }}>
-              <input placeholder="Username" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} required />
-              <input placeholder="Email" type="email" value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} required />
-              <input placeholder="Password" type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} required />
-              <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)}>
-                {userRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <button type="submit">Create User</button>
-            </form>
-          </section>
+        {/* Content */}
+        <main className="content">
+          {msg && <div className={`alert ${msgOk ? 'alert-ok' : 'alert-err'}`}>{msg}</div>}
 
-          <section style={{ marginTop: 24 }}>
-            <h2>Users</h2>
-            <ul>
-              {pagedUsers.map((u) => (
-                <li key={u.id} style={{ marginBottom: 8 }}>
-                  <b>{u.username}</b> ({u.email}) — role: {u.role} — {u.is_active ? 'active' : 'inactive'}{' '}
-                  <button onClick={() => setEditingUser(editingUser === u.id ? null : u.id)}>Edit</button>
-                  {u.username !== 'superadmin' && (
-                    <button onClick={() => updateUser(u.id, { is_active: !u.is_active })}>
-                      {u.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  )}
-                  {editingUser === u.id && (
-                    <span style={{ marginLeft: 8 }}>
-                      <select defaultValue={u.role} onChange={(e) => updateUser(u.id, { role: e.target.value })}>
-                        <option value="user">user</option>
-                        <option value="admin">admin</option>
-                        <option value="superadmin">superadmin</option>
+          {/* ── Overview ─────────────────────────────────────── */}
+          {tab === 'overview' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">Overview</h1>
+                <p className="page-subtitle">Your recurring payments at a glance</p>
+              </div>
+              <div className="stats-grid">
+                <div className="stat-card"><div className="stat-label">Clients</div><div className="stat-value accent">{clients.length}</div></div>
+                <div className="stat-card"><div className="stat-label">Projects</div><div className="stat-value accent">{projects.length}</div></div>
+                <div className="stat-card"><div className="stat-label">FX Rates</div><div className="stat-value">{rates.length}</div></div>
+                <div className="stat-card"><div className="stat-label">Invoices</div><div className="stat-value">{invoices.length}</div></div>
+                <div className="stat-card"><div className="stat-label">Job Runs</div><div className="stat-value">{jobs.length}</div></div>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Quick Actions</span></div>
+                <button className="btn btn-primary" onClick={runJobsNow}>▶ Run Jobs Now</button>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">Recent Invoices</span>
+                  <span className="card-count">{invoices.length} total</span>
+                </div>
+                {invoices.length === 0 ? <Empty label="invoices" /> : (
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Date</th><th>Project</th><th>USD</th><th>FX Rate</th><th>GHS</th><th>Type</th></tr></thead>
+                      <tbody>
+                        {invoices.slice(0, 10).map(inv => (
+                          <tr key={inv.id}>
+                            <td className="td-mono">{inv.invoice_date}</td>
+                            <td>{projects.find(p => p.id === inv.project_id)?.name ?? `#${inv.project_id}`}</td>
+                            <td className="td-mono">${inv.amount_usd.toFixed(2)}</td>
+                            <td className="td-mono">{inv.fx_rate}</td>
+                            <td className="td-mono">GHS {inv.amount_ghs.toFixed(2)}</td>
+                            <td><span className="badge badge-grey">{inv.rate_type}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── Clients ──────────────────────────────────────── */}
+          {tab === 'clients' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">Clients</h1>
+                <p className="page-subtitle">Manage your billing clients</p>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Add Client</span></div>
+                <form onSubmit={addClient} className="form-grid">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Name</label>
+                      <input className="input" placeholder="Acme Corp" value={clientName} onChange={e => setClientName(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Email</label>
+                      <input className="input" type="email" placeholder="billing@acme.com" value={clientEmail} onChange={e => setClientEmail(e.target.value)} required />
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit">Add Client</button>
+                  </div>
+                </form>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">All Clients</span>
+                  <span className="card-count">{clients.length}</span>
+                </div>
+                {clients.length === 0 ? <Empty label="clients" /> : (
+                  <>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>#</th><th>Name</th><th>Email</th><th></th></tr></thead>
+                        <tbody>
+                          {pagedClients.map(c => (
+                            <tr key={c.id}>
+                              <td className="td-id">{c.id}</td>
+                              <td><strong>{c.name}</strong></td>
+                              <td style={{ color: 'var(--text-muted)' }}>{c.email}</td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button className="btn btn-danger-soft btn-sm" onClick={() => deleteClient(c.id)}>Delete</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination page={clientPage} pages={clientPages} onPrev={() => setClientPage(p => p - 1)} onNext={() => setClientPage(p => p + 1)} />
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── Projects ─────────────────────────────────────── */}
+          {tab === 'projects' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">Projects</h1>
+                <p className="page-subtitle">Recurring billing projects</p>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Add Project</span></div>
+                <form onSubmit={addProject} className="form-grid">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Project Name</label>
+                      <input className="input" placeholder="Monthly retainer" value={projectName} onChange={e => setProjectName(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Client</label>
+                      <select className="select" value={projectClientId} onChange={e => setProjectClientId(e.target.value)} required>
+                        <option value="">Select client…</option>
+                        {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <p>
-              Page {userPage} of {userPages}{' '}
-              <button disabled={userPage <= 1} onClick={() => setUserPage((p) => Math.max(1, p - 1))}>Prev</button>{' '}
-              <button disabled={userPage >= userPages} onClick={() => setUserPage((p) => Math.min(userPages, p + 1))}>Next</button>
-            </p>
-          </section>
+                    </div>
+                  </div>
+                  <div className="form-row-3">
+                    <div className="form-group">
+                      <label className="form-label">Amount (USD)</label>
+                      <input className="input" type="number" step="0.01" min="0.01" placeholder="500.00" value={amountUsd} onChange={e => setAmountUsd(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Next Invoice Date</label>
+                      <input className="input" type="date" value={nextDate} onChange={e => setNextDate(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Rate Type</label>
+                      <select className="select" value={rateType} onChange={e => setRateType(e.target.value)}>
+                        {RATE_TYPES.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit">Add Project</button>
+                  </div>
+                </form>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">All Projects</span>
+                  <span className="card-count">{projects.length}</span>
+                </div>
+                {projects.length === 0 ? <Empty label="projects" /> : (
+                  <>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>#</th><th>Name</th><th>Client</th><th>USD / mo</th><th>Rate Type</th><th>Next Invoice</th><th></th></tr></thead>
+                        <tbody>
+                          {pagedProjects.map(p => (
+                            <tr key={p.id}>
+                              <td className="td-id">{p.id}</td>
+                              <td><strong>{p.name}</strong></td>
+                              <td style={{ color: 'var(--text-muted)' }}>{clients.find(c => c.id === p.client_id)?.name ?? `#${p.client_id}`}</td>
+                              <td className="td-mono">${p.amount_usd.toFixed(2)}</td>
+                              <td><span className="badge badge-grey">{p.rate_type}</span></td>
+                              <td className="td-mono" style={{ color: new Date(p.next_invoice_date) <= new Date() ? 'var(--danger)' : 'var(--text)' }}>{p.next_invoice_date}</td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button className="btn btn-danger-soft btn-sm" onClick={() => deleteProject(p.id)}>Delete</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination page={projectPage} pages={projectPages} onPrev={() => setProjectPage(p => p - 1)} onNext={() => setProjectPage(p => p + 1)} />
+                  </>
+                )}
+              </div>
+            </>
+          )}
 
-          <section style={{ marginTop: 24 }}>
-            <h2>Actions</h2>
-            <button onClick={runJobsNow}>Run jobs now</button>
-          </section>
+          {/* ── FX Rates ──────────────────────────────────────── */}
+          {tab === 'rates' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">FX Rates</h1>
+                <p className="page-subtitle">Exchange rates for invoice conversion</p>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Ingest Bank PDF Rate</span></div>
+                <form onSubmit={ingestPdf} className="form-grid">
+                  <div className="form-group">
+                    <label className="form-label">PDF URL</label>
+                    <input className="input" placeholder="https://bank.example/forex.pdf" value={pdfUrl} onChange={e => setPdfUrl(e.target.value)} required />
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit">Ingest PDF</button>
+                  </div>
+                </form>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">All Rates</span>
+                  <span className="card-count">{rates.length}</span>
+                </div>
+                {rates.length === 0 ? <Empty label="rates" /> : (
+                  <>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>Date</th><th>Code</th><th>Cash Buy</th><th>Cash Sell</th><th>TTS Buy</th><th>TTS Sell</th></tr></thead>
+                        <tbody>
+                          {pagedRates.map(r => (
+                            <tr key={r.id}>
+                              <td className="td-mono">{r.rate_date}</td>
+                              <td><span className="badge badge-blue">{r.code}</span></td>
+                              <td className="td-mono">{r.cash_buying}</td>
+                              <td className="td-mono">{r.cash_selling}</td>
+                              <td className="td-mono">{r.tts_buying}</td>
+                              <td className="td-mono">{r.tts_selling}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination page={ratePage} pages={ratePages} onPrev={() => setRatePage(p => p - 1)} onNext={() => setRatePage(p => p + 1)} />
+                  </>
+                )}
+              </div>
+            </>
+          )}
 
-          <section style={{ marginTop: 24 }}>
-            <h2>Add Client</h2>
-            <form onSubmit={addClient} style={{ display: 'grid', gap: 8 }}>
-              <input placeholder="Client Name" value={clientName} onChange={(e) => setClientName(e.target.value)} required />
-              <input placeholder="Client Email" type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} required />
-              <button type="submit">Save Client</button>
-            </form>
-          </section>
+          {/* ── Invoices ──────────────────────────────────────── */}
+          {tab === 'invoices' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">Invoices</h1>
+                <p className="page-subtitle">Generated invoice history</p>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">All Invoices</span>
+                  <span className="card-count">{invoices.length}</span>
+                </div>
+                {invoices.length === 0 ? <Empty label="invoices" /> : (
+                  <>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>#</th><th>Date</th><th>Project</th><th>USD</th><th>FX Rate</th><th>GHS</th><th>Type</th></tr></thead>
+                        <tbody>
+                          {pagedInvoices.map(inv => (
+                            <tr key={inv.id}>
+                              <td className="td-id">{inv.id}</td>
+                              <td className="td-mono">{inv.invoice_date}</td>
+                              <td>{projects.find(p => p.id === inv.project_id)?.name ?? `#${inv.project_id}`}</td>
+                              <td className="td-mono">${inv.amount_usd.toFixed(2)}</td>
+                              <td className="td-mono">{inv.fx_rate}</td>
+                              <td className="td-mono">GHS {inv.amount_ghs.toFixed(2)}</td>
+                              <td><span className="badge badge-grey">{inv.rate_type}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination page={invoicePage} pages={invoicePages} onPrev={() => setInvoicePage(p => p - 1)} onNext={() => setInvoicePage(p => p + 1)} />
+                  </>
+                )}
+              </div>
+            </>
+          )}
 
-          <section style={{ marginTop: 24 }}>
-            <h2>Add Project</h2>
-            <form onSubmit={addProject} style={{ display: 'grid', gap: 8 }}>
-              <input placeholder="Project Name" value={projectName} onChange={(e) => setProjectName(e.target.value)} required />
-              <select value={projectClientId} onChange={(e) => setProjectClientId(e.target.value)} required>
-                <option value="">Select Client</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <input placeholder="Amount USD" type="number" step="0.01" value={amountUsd} onChange={(e) => setAmountUsd(e.target.value)} required />
-              <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} required />
-              <select value={rateType} onChange={(e) => setRateType(e.target.value)}>
-                {rateTypes.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <button type="submit">Save Project</button>
-            </form>
-          </section>
+          {/* ── Job Logs ──────────────────────────────────────── */}
+          {tab === 'jobs' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">Job Logs</h1>
+                <p className="page-subtitle">Scheduler and worker activity</p>
+              </div>
+              <div className="card" style={{ marginBottom: 18 }}>
+                <button className="btn btn-primary" onClick={runJobsNow}>▶ Run Jobs Now</button>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">Recent Logs</span>
+                  <span className="card-count">{jobs.length}</span>
+                </div>
+                {jobs.length === 0 ? <Empty label="job logs" /> : (
+                  <>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>Time</th><th>Job</th><th>Status</th><th>Message</th></tr></thead>
+                        <tbody>
+                          {pagedJobs.map(j => (
+                            <tr key={j.id}>
+                              <td className="td-mono" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(j.created_at).toLocaleString()}</td>
+                              <td><span className="badge badge-grey">{j.job_name}</span></td>
+                              <td><StatusBadge status={j.status} /></td>
+                              <td style={{ color: 'var(--text-muted)', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.message}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination page={jobPage} pages={jobPages} onPrev={() => setJobPage(p => p - 1)} onNext={() => setJobPage(p => p + 1)} />
+                  </>
+                )}
+              </div>
+            </>
+          )}
 
-          <section style={{ marginTop: 24 }}>
-            <h2>Ingest Bank PDF Rate</h2>
-            <form onSubmit={ingestPdfRate} style={{ display: 'grid', gap: 8 }}>
-              <input placeholder="https://bank.example/forex.pdf" value={pdfUrl} onChange={(e) => setPdfUrl(e.target.value)} required />
-              <button type="submit">Ingest PDF</button>
-            </form>
-          </section>
-
-          <section style={{ marginTop: 24 }}>
-            <h2>Recent Data</h2>
-            <p>Clients: {clients.length} | Projects: {projects.length} | Rates: {rates.length} | Invoices: {invoices.length} | Jobs: {jobs.length}</p>
-            <h3>Clients</h3>
-            <ul>{pagedClients.map((c) => <li key={c.id}>{c.name} ({c.email})</li>)}</ul>
-            <p>
-              Page {clientPage} of {clientPages}{' '}
-              <button disabled={clientPage <= 1} onClick={() => setClientPage((p) => Math.max(1, p - 1))}>Prev</button>{' '}
-              <button disabled={clientPage >= clientPages} onClick={() => setClientPage((p) => Math.min(clientPages, p + 1))}>Next</button>
-            </p>
-            <h3>Projects</h3>
-            <ul>{pagedProjects.map((p) => <li key={p.id}>{p.name} - USD {p.amount_usd} - {p.next_invoice_date}</li>)}</ul>
-            <p>
-              Page {projectPage} of {projectPages}{' '}
-              <button disabled={projectPage <= 1} onClick={() => setProjectPage((p) => Math.max(1, p - 1))}>Prev</button>{' '}
-              <button disabled={projectPage >= projectPages} onClick={() => setProjectPage((p) => Math.min(projectPages, p + 1))}>Next</button>
-            </p>
-          </section>
-        </>
-      )}
-    </main>
+          {/* ── Users ────────────────────────────────────────── */}
+          {tab === 'users' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">Users</h1>
+                <p className="page-subtitle">Account management (superadmin only)</p>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Create User</span></div>
+                <form onSubmit={createUser} className="form-grid">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Username</label>
+                      <input className="input" placeholder="john_doe" value={newUsername} onChange={e => setNewUsername(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Email</label>
+                      <input className="input" type="email" placeholder="john@example.com" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} required />
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Password</label>
+                      <input className="input" type="password" placeholder="Min 8 characters" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Role</label>
+                      <select className="select" value={newUserRole} onChange={e => setNewUserRole(e.target.value)}>
+                        {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit">Create User</button>
+                  </div>
+                </form>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">All Users</span>
+                  <span className="card-count">{users.length}</span>
+                </div>
+                {users.length === 0 ? <Empty label="users" /> : (
+                  <>
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th>#</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody>
+                          {pagedUsers.map(u => (
+                            <>
+                              <tr key={u.id}>
+                                <td className="td-id">{u.id}</td>
+                                <td><strong>{u.username}</strong></td>
+                                <td style={{ color: 'var(--text-muted)' }}>{u.email}</td>
+                                <td><RoleBadge role={u.role} /></td>
+                                <td>
+                                  <span className={`badge ${u.is_active ? 'badge-green' : 'badge-grey'}`}>{u.is_active ? 'Active' : 'Inactive'}</span>
+                                </td>
+                                <td>
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => setEditingUser(editingUser === u.id ? null : u.id)}>
+                                      {editingUser === u.id ? 'Cancel' : 'Edit'}
+                                    </button>
+                                    {u.username !== 'superadmin' && (
+                                      <button className="btn btn-ghost btn-sm" onClick={() => updateUser(u.id, { is_active: !u.is_active })}>
+                                        {u.is_active ? 'Deactivate' : 'Activate'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                              {editingUser === u.id && (
+                                <tr key={`edit-${u.id}`}>
+                                  <td colSpan={6} style={{ padding: '8px 14px', background: 'var(--surface-2)' }}>
+                                    <div className="edit-row">
+                                      <span style={{ fontSize: 12, color: 'var(--text-muted)', marginRight: 4 }}>Change role:</span>
+                                      <select
+                                        className="select"
+                                        defaultValue={u.role}
+                                        onChange={e => { updateUser(u.id, { role: e.target.value }); setEditingUser(null) }}
+                                        style={{ width: 'auto' }}
+                                      >
+                                        <option value="user">user</option>
+                                        <option value="admin">admin</option>
+                                        <option value="superadmin">superadmin</option>
+                                      </select>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination page={userPage} pages={userPages} onPrev={() => setUserPage(p => p - 1)} onNext={() => setUserPage(p => p + 1)} />
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+    </div>
   )
 }

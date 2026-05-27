@@ -1,3 +1,5 @@
+import './globals.css'
+
 export const metadata = { title: 'Recurring Payments', description: 'Recurring Payments Dashboard' }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
