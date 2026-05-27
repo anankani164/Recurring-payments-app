@@ -11,4 +11,4 @@ cmds = [
 cmds = []
 
 [start]
-cmd = "export PATH=/app/.venv/bin:$PATH && export PYTHONPATH=/app && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+cmd = "export PYTHONPATH=/app && /app/.venv/bin/alembic upgrade head && /app/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port $PORT"
