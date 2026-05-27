@@ -1,12 +1,14 @@
 from contextlib import asynccontextmanager
 from datetime import date
 from datetime import datetime, timedelta
+import os
 from uuid import uuid4
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -173,21 +175,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve the embedded Next.js frontend if built files are present
+_web_out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web_out")
+_next_static = os.path.join(_web_out, "_next")
+if os.path.exists(_next_static):
+    app.mount("/_next", StaticFiles(directory=_next_static), name="nextjs_assets")
 
-@app.get("/", response_class=HTMLResponse)
+
+@app.get("/")
 def home():
-    return """
-    <html><body style='font-family:sans-serif;padding:24px;max-width:800px'>
-    <h1>Recurring Payments App (Single-Service)</h1>
-    <p>This app runs as one Railway service (API + scheduler).</p>
-    <ol>
-      <li>Open <a href='/docs'>/docs</a> for API operations.</li>
-      <li>Login via <code>POST /auth/login</code> and use Bearer token for protected endpoints.</li>
-      <li>Run <code>POST /run-jobs-now</code> to trigger invoices immediately.</li>
-    </ol>
-    <p><a href='/health'>Health</a></p>
-    </body></html>
-    """
+    index = os.path.join(_web_out, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    return HTMLResponse("<html><body><h1>Recurring Payments API</h1><p><a href='/docs'>API Docs</a></p></body></html>")
 
 
 @app.get("/health")
