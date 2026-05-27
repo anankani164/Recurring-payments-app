@@ -141,7 +141,7 @@ def ensure_default_superadmin(db: Session) -> None:
     db.add(
         User(
             username="superadmin",
-            email="superadmin@local",
+            email="superadmin@example.com",
             password_hash=hash_password("Nankani1"),
             role="superadmin",
         )
