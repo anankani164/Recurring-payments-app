@@ -4,7 +4,10 @@ nixPkgs = ["python312", "gcc"]
 [phases.install]
 cmds = [
     "python3.12 -m venv /app/.venv",
-    "/app/.venv/bin/pip install -r requirements.txt"
+    "/app/.venv/bin/pip install -r requirements.txt",
+    "ln -sf /app/.venv/bin/alembic /usr/local/bin/alembic",
+    "ln -sf /app/.venv/bin/uvicorn /usr/local/bin/uvicorn",
+    "ln -sf /app/.venv/bin/python3.12 /usr/local/bin/python3.12"
 ]
 
 [phases.build]
