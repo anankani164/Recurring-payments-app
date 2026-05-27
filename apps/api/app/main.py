@@ -5,7 +5,7 @@ import os
 from uuid import uuid4
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,7 +33,7 @@ from .config import (
 from .database import SessionLocal, get_db
 from .models import Client, FxRate, Invoice, JobLog, Project, SchedulerLock, User
 from .observability import configure_logging, log_event
-from .pdf_rates import PdfParseError, parse_bank_pdf_rates
+from .pdf_rates import PdfParseError, parse_bank_pdf_rates, parse_uploaded_pdf
 from .schemas import (
     ClientCreate,
     ClientRead,
@@ -342,6 +342,31 @@ def ingest_pdf_rates(payload: ParsePdfRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Rate for this date/code already exists") from exc
     db.refresh(rate)
     create_job_log(db, "pdf_ingestion", "success", f"Ingested {rate.code} {rate.rate_date}")
+    return rate
+
+@app.post("/rates/upload-pdf", response_model=FxRateRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_user)])
+async def upload_pdf_rates(
+    file: UploadFile = File(...),
+    target_code: str = Form(default="USD"),
+    db: Session = Depends(get_db),
+):
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=422, detail="Only PDF files are accepted")
+    pdf_bytes = await file.read()
+    try:
+        parsed = parse_uploaded_pdf(pdf_bytes, target_code)
+    except PdfParseError as exc:
+        create_job_log(db, "pdf_upload", "failed", str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    rate = FxRate(source_url=f"upload:{file.filename}", **parsed)
+    db.add(rate)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Rate for this date/code already exists") from exc
+    db.refresh(rate)
+    create_job_log(db, "pdf_upload", "success", f"Uploaded {rate.code} {rate.rate_date}")
     return rate
 
 @app.post('/run-jobs-now', dependencies=[Depends(require_admin_user)])

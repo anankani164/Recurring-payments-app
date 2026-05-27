@@ -81,7 +81,9 @@ export default function Dashboard() {
   const [nextDate,        setNextDate]        = useState('')
   const [rateType,        setRateType]        = useState('tts_selling')
 
-  const [pdfUrl, setPdfUrl] = useState('')
+  const [pdfUrl,    setPdfUrl]    = useState('')
+  const [pdfFile,   setPdfFile]   = useState<File | null>(null)
+  const [pdfCode,   setPdfCode]   = useState('USD')
 
   // manual FX rate entry
   const [manualRateDate,    setManualRateDate]    = useState('')
@@ -240,12 +242,27 @@ export default function Dashboard() {
     ok('Invoice generated'); await loadData()
   }
 
+  const uploadPdf = async (e: FormEvent) => {
+    e.preventDefault(); setMsg('')
+    if (!pdfFile) return err('Please select a PDF file')
+    const formData = new FormData()
+    formData.append('file', pdfFile)
+    formData.append('target_code', pdfCode)
+    const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+    const res = await fetch(`${apiBase}/rates/upload-pdf`, { method: 'POST', headers: authHeaders, body: formData })
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      return err(detail?.detail ?? 'Could not process uploaded PDF')
+    }
+    setPdfFile(null); ok('Rate extracted from PDF'); await loadData()
+  }
+
   const ingestPdf = async (e: FormEvent) => {
     e.preventDefault(); setMsg('')
     if (!pdfUrl.startsWith('http://') && !pdfUrl.startsWith('https://')) return err('URL must start with http:// or https://')
-    const res = await fetch(`${apiBase}/rates/ingest-pdf`, { method: 'POST', headers, body: JSON.stringify({ source_url: pdfUrl, target_code: 'USD' }) })
+    const res = await fetch(`${apiBase}/rates/ingest-pdf`, { method: 'POST', headers, body: JSON.stringify({ source_url: pdfUrl, target_code: pdfCode }) })
     if (!res.ok) return err('Could not ingest PDF rate')
-    setPdfUrl(''); ok('Rate ingested'); await loadData()
+    setPdfUrl(''); ok('Rate ingested from URL'); await loadData()
   }
 
   const runJobsNow = async () => {
@@ -564,14 +581,50 @@ export default function Dashboard() {
                 </form>
               </div>
               <div className="card">
-                <div className="card-header"><span className="card-title">Ingest Rate from Bank PDF</span></div>
+                <div className="card-header"><span className="card-title">Upload PDF from Device</span></div>
+                <form onSubmit={uploadPdf} className="form-grid">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">PDF File</label>
+                      <input
+                        className="input"
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        onChange={e => setPdfFile(e.target.files?.[0] ?? null)}
+                        required
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Currency Code</label>
+                      <input className="input" placeholder="USD" value={pdfCode} onChange={e => setPdfCode(e.target.value.toUpperCase())} maxLength={5} required />
+                    </div>
+                  </div>
+                  {pdfFile && (
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Selected: <strong style={{ color: 'var(--text)' }}>{pdfFile.name}</strong> ({(pdfFile.size / 1024).toFixed(1)} KB)
+                    </p>
+                  )}
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit">Upload &amp; Parse</button>
+                  </div>
+                </form>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Ingest from URL</span></div>
                 <form onSubmit={ingestPdf} className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label">PDF URL</label>
-                    <input className="input" placeholder="https://bank.example/forex.pdf" value={pdfUrl} onChange={e => setPdfUrl(e.target.value)} required />
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">PDF URL</label>
+                      <input className="input" placeholder="https://bank.example/forex.pdf" value={pdfUrl} onChange={e => setPdfUrl(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Currency Code</label>
+                      <input className="input" placeholder="USD" value={pdfCode} onChange={e => setPdfCode(e.target.value.toUpperCase())} maxLength={5} required />
+                    </div>
                   </div>
                   <div className="form-actions">
-                    <button className="btn btn-secondary" type="submit">Ingest PDF</button>
+                    <button className="btn btn-secondary" type="submit">Ingest from URL</button>
                   </div>
                 </form>
               </div>

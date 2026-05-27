@@ -101,6 +101,41 @@ def _to_num(raw: str) -> float:
     return float(raw.replace(",", "").strip())
 
 
+def _parse_from_path(pdf_path: Path, target_code: str) -> dict:
+    """Core parsing logic — operates on a local file path."""
+    code = target_code.upper().strip()
+    with pdfplumber.open(pdf_path) as pdf:
+        text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+        rate_date = _parse_date(text)
+
+        for page in pdf.pages:
+            tables = page.extract_tables() or []
+            for table in tables:
+                for row in table:
+                    if not row:
+                        continue
+                    normalized = [str(col).strip() if col else "" for col in row]
+                    extracted = _extract_rates_from_row(normalized, code)
+                    if extracted:
+                        return {"rate_date": rate_date, **extracted}
+
+        extracted = _extract_rates_from_text(text, code)
+        if extracted:
+            return {"rate_date": rate_date, **extracted}
+
+        ocr_text = _extract_text_via_ocr(pdf_path)
+        if ocr_text:
+            try:
+                ocr_date = _parse_date(ocr_text)
+            except PdfParseError:
+                ocr_date = rate_date
+            extracted = _extract_rates_from_text(ocr_text, code)
+            if extracted:
+                return {"rate_date": ocr_date, **extracted}
+
+    raise PdfParseError(f"Could not find {code} rates in PDF table, text, or OCR fallback")
+
+
 def parse_bank_pdf_rates(source_url: str, target_code: str = "USD") -> dict:
     code = target_code.upper().strip()
     if not code:
@@ -113,38 +148,22 @@ def parse_bank_pdf_rates(source_url: str, target_code: str = "USD") -> dict:
         temp_path = Path(tmp_file.name)
 
     try:
-        with pdfplumber.open(temp_path) as pdf:
-            text = "\n".join((page.extract_text() or "") for page in pdf.pages)
-            rate_date = _parse_date(text)
-
-            # Strategy 1: table extraction (preferred)
-            for page in pdf.pages:
-                tables = page.extract_tables() or []
-                for table in tables:
-                    for row in table:
-                        if not row:
-                            continue
-                        normalized = [str(col).strip() if col else "" for col in row]
-                        extracted = _extract_rates_from_row(normalized, code)
-                        if extracted:
-                            return {"rate_date": rate_date, **extracted}
-
-            # Strategy 2: plain-text fallback for non-tabular PDF layouts
-            extracted = _extract_rates_from_text(text, code)
-            if extracted:
-                return {"rate_date": rate_date, **extracted}
-
-            # Strategy 3: OCR fallback for scanned/image PDFs
-            ocr_text = _extract_text_via_ocr(temp_path)
-            if ocr_text:
-                try:
-                    ocr_date = _parse_date(ocr_text)
-                except PdfParseError:
-                    ocr_date = rate_date
-                extracted = _extract_rates_from_text(ocr_text, code)
-                if extracted:
-                    return {"rate_date": ocr_date, **extracted}
+        return _parse_from_path(temp_path, code)
     finally:
         temp_path.unlink(missing_ok=True)
 
-    raise PdfParseError(f"Could not find {code} rates in PDF table, text, or OCR fallback")
+
+def parse_uploaded_pdf(pdf_bytes: bytes, target_code: str = "USD") -> dict:
+    """Parse rates from raw PDF bytes (file upload path)."""
+    code = target_code.upper().strip()
+    if not code:
+        raise PdfParseError("target_code is required")
+
+    with tempfile.NamedTemporaryFile(prefix="fx_upload_", suffix=".pdf", delete=False) as tmp_file:
+        tmp_file.write(pdf_bytes)
+        temp_path = Path(tmp_file.name)
+
+    try:
+        return _parse_from_path(temp_path, code)
+    finally:
+        temp_path.unlink(missing_ok=True)
