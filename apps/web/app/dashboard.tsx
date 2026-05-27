@@ -64,11 +64,12 @@ function RoleBadge({ role }: { role: string }) {
 export default function Dashboard() {
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || ''
 
-  const [health, setHealth]   = useState('checking…')
-  const [token, setToken]     = useState('')
-  const [tab, setTab]         = useState<Tab>('overview')
-  const [msg, setMsg]         = useState('')
-  const [msgOk, setMsgOk]     = useState(true)
+  const [health, setHealth]       = useState('checking…')
+  const [token, setToken]         = useState('')
+  const [tab, setTab]             = useState<Tab>('overview')
+  const [msg, setMsg]             = useState('')
+  const [msgOk, setMsgOk]         = useState(true)
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const [username, setUsername] = useState('superadmin')
   const [password, setPassword] = useState('')
@@ -453,11 +454,19 @@ export default function Dashboard() {
   // ── Main App ──────────────────────────────────────────────────────────────
   return (
     <div className="app">
+      {/* Drawer overlay */}
+      <div className={`drawer-overlay ${drawerOpen ? 'open' : ''}`} onClick={() => setDrawerOpen(false)} />
+
       {/* Header */}
       <header className="header">
-        <div className="header-logo">
-          <div className="logo-badge">R</div>
-          <span className="logo-text">Recurring Payments</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="hamburger" onClick={() => setDrawerOpen(o => !o)} aria-label="Menu">
+            <span /><span /><span />
+          </button>
+          <div className="header-logo">
+            <div className="logo-badge">R</div>
+            <span className="logo-text">Recurring Payments</span>
+          </div>
         </div>
         <div className="header-right">
           <div className="api-status">
@@ -469,11 +478,15 @@ export default function Dashboard() {
       </header>
 
       <div className="main-layout">
-        {/* Sidebar */}
-        <aside className="sidebar">
+        {/* Sidebar / Drawer */}
+        <aside className={`sidebar ${drawerOpen ? 'open' : ''}`}>
           <div className="sidebar-group-label">Navigation</div>
           {NAV.map(item => (
-            <button key={item.id} className={`nav-btn ${tab === item.id ? 'active' : ''}`} onClick={() => { setTab(item.id); setMsg('') }}>
+            <button
+              key={item.id}
+              className={`nav-btn ${tab === item.id ? 'active' : ''}`}
+              onClick={() => { setTab(item.id); setMsg(''); setDrawerOpen(false) }}
+            >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
             </button>
@@ -1150,21 +1163,6 @@ export default function Dashboard() {
         </main>
       </div>
 
-      {/* Mobile bottom navigation */}
-      <nav className="bottom-nav">
-        <div className="bottom-nav-items">
-          {NAV.map(item => (
-            <button
-              key={item.id}
-              className={`bottom-nav-btn ${tab === item.id ? 'active' : ''}`}
-              onClick={() => { setTab(item.id); setMsg('') }}
-            >
-              <span className="bnav-icon">{item.icon}</span>
-              <span className="bnav-label">{item.mobileLabel}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
     </div>
   )
 }
