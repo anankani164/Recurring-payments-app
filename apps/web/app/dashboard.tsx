@@ -14,14 +14,14 @@ const PAGE_SIZE = 8
 const RATE_TYPES = ['cash_buying', 'cash_selling', 'tts_buying', 'tts_selling']
 const USER_ROLES = ['admin', 'user']
 
-const NAV: { id: Tab; label: string; icon: string }[] = [
-  { id: 'overview',  label: 'Overview',  icon: '◈' },
-  { id: 'clients',   label: 'Clients',   icon: '⊙' },
-  { id: 'projects',  label: 'Projects',  icon: '▦' },
-  { id: 'rates',     label: 'FX Rates',  icon: '⇄' },
-  { id: 'invoices',  label: 'Invoices',  icon: '◻' },
-  { id: 'jobs',      label: 'Job Logs',  icon: '◉' },
-  { id: 'users',     label: 'Users',     icon: '◐' },
+const NAV: { id: Tab; label: string; icon: string; mobileLabel: string }[] = [
+  { id: 'overview',  label: 'Overview',  icon: '◈', mobileLabel: 'Home'     },
+  { id: 'clients',   label: 'Clients',   icon: '⊙', mobileLabel: 'Clients'  },
+  { id: 'projects',  label: 'Projects',  icon: '▦', mobileLabel: 'Projects' },
+  { id: 'rates',     label: 'FX Rates',  icon: '⇄', mobileLabel: 'Rates'    },
+  { id: 'invoices',  label: 'Invoices',  icon: '◻', mobileLabel: 'Invoices' },
+  { id: 'jobs',      label: 'Job Logs',  icon: '◉', mobileLabel: 'Jobs'     },
+  { id: 'users',     label: 'Users',     icon: '◐', mobileLabel: 'Users'    },
 ]
 
 function Pagination({ page, pages, onPrev, onNext }: { page: number; pages: number; onPrev: () => void; onNext: () => void }) {
@@ -812,6 +812,22 @@ export default function Dashboard() {
           )}
         </main>
       </div>
+
+      {/* Mobile bottom navigation */}
+      <nav className="bottom-nav">
+        <div className="bottom-nav-items">
+          {NAV.map(item => (
+            <button
+              key={item.id}
+              className={`bottom-nav-btn ${tab === item.id ? 'active' : ''}`}
+              onClick={() => { setTab(item.id); setMsg('') }}
+            >
+              <span className="bnav-icon">{item.icon}</span>
+              <span className="bnav-label">{item.mobileLabel}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   )
 }
