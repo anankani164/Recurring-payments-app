@@ -2,7 +2,7 @@
 FROM node:20-slim AS web-builder
 WORKDIR /web
 COPY apps/web/package*.json ./
-RUN npm ci
+RUN npm install
 COPY apps/web/ ./
 # Empty = same origin, so the frontend calls the API on the same domain
 ENV NEXT_PUBLIC_API_BASE_URL=""
