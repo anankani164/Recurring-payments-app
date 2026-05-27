@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from .models import User
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+http_bearer = HTTPBearer(auto_error=False)
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
@@ -43,12 +45,12 @@ def require_api_token(x_api_token: str | None = Header(default=None)) -> None:
 
 
 def require_current_user(
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
     db: Session = Depends(get_db),
 ) -> User:
-    if not authorization or not authorization.startswith("Bearer "):
+    if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
-    token = authorization.replace("Bearer ", "", 1).strip()
+    token = credentials.credentials
     payload = decode_token(token)
     username = payload.get("sub")
     if not username:
