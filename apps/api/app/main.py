@@ -226,6 +226,18 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="User not found")
     if user.username == "superadmin" and payload.is_active is False:
         raise HTTPException(status_code=400, detail="Cannot deactivate superadmin")
+    if payload.username is not None:
+        conflict = db.execute(select(User).where(User.username == payload.username)).scalars().first()
+        if conflict and conflict.id != user_id:
+            raise HTTPException(status_code=409, detail="Username already taken")
+        user.username = payload.username
+    if payload.email is not None:
+        conflict = db.execute(select(User).where(User.email == payload.email)).scalars().first()
+        if conflict and conflict.id != user_id:
+            raise HTTPException(status_code=409, detail="Email already taken")
+        user.email = payload.email
+    if payload.password is not None:
+        user.password_hash = hash_password(payload.password)
     if payload.role is not None:
         if payload.role not in {"admin", "user", "superadmin"}:
             raise HTTPException(status_code=422, detail="Invalid role")

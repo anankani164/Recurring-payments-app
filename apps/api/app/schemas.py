@@ -127,6 +127,9 @@ class UserRead(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=100)
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
     role: str | None = None
     is_active: bool | None = None
 
