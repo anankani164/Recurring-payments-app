@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react'
 
 type Client = { id: number; name: string; email: string }
 type Project = { id: number; name: string; client_id: number; amount_usd: number; recurrence: string; rate_type: string; next_invoice_date: string }
@@ -82,6 +82,18 @@ export default function Dashboard() {
   const [rateType,        setRateType]        = useState('tts_selling')
 
   const [pdfUrl, setPdfUrl] = useState('')
+
+  // manual FX rate entry
+  const [manualRateDate,    setManualRateDate]    = useState('')
+  const [manualRateCode,    setManualRateCode]    = useState('USD')
+  const [manualCashBuying,  setManualCashBuying]  = useState('')
+  const [manualCashSelling, setManualCashSelling] = useState('')
+  const [manualTtsBuying,   setManualTtsBuying]   = useState('')
+  const [manualTtsSelling,  setManualTtsSelling]  = useState('')
+
+  // manual invoice generation
+  const [invoiceProjectId, setInvoiceProjectId] = useState('')
+  const [invoiceDate,      setInvoiceDate]      = useState('')
 
   const [newUsername, setNewUsername] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
@@ -166,7 +178,7 @@ export default function Dashboard() {
     const res = await fetch(`${apiBase}/clients`, { method: 'POST', headers, body: JSON.stringify({ name: clientName, email: clientEmail }) })
     if (!res.ok) return err('Could not create client')
     setClientName(''); setClientEmail('')
-    await loadData()
+    ok('Client created'); await loadData()
   }
 
   const deleteClient = async (id: number) => {
@@ -186,13 +198,46 @@ export default function Dashboard() {
     })
     if (!res.ok) return err('Could not create project')
     setProjectName(''); setProjectClientId(''); setAmountUsd(''); setNextDate(''); setRateType('tts_selling')
-    await loadData()
+    ok('Project created'); await loadData()
   }
 
   const deleteProject = async (id: number) => {
     const res = await fetch(`${apiBase}/projects/${id}`, { method: 'DELETE', headers })
     if (!res.ok) return err('Could not delete project')
     ok('Project deleted'); await loadData()
+  }
+
+  const addManualRate = async (e: FormEvent) => {
+    e.preventDefault(); setMsg('')
+    if (!manualRateDate) return err('Rate date is required')
+    const body = {
+      rate_date: manualRateDate,
+      code: manualRateCode,
+      cash_buying:  Number(manualCashBuying),
+      cash_selling: Number(manualCashSelling),
+      tts_buying:   Number(manualTtsBuying),
+      tts_selling:  Number(manualTtsSelling),
+    }
+    const res = await fetch(`${apiBase}/rates`, { method: 'POST', headers, body: JSON.stringify(body) })
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      return err(detail?.detail ?? 'Could not save rate')
+    }
+    setManualRateDate(''); setManualCashBuying(''); setManualCashSelling(''); setManualTtsBuying(''); setManualTtsSelling('')
+    ok('Rate saved'); await loadData()
+  }
+
+  const generateInvoice = async (e: FormEvent) => {
+    e.preventDefault(); setMsg('')
+    if (!invoiceProjectId) return err('Please select a project')
+    if (!invoiceDate) return err('Invoice date is required')
+    const res = await fetch(`${apiBase}/projects/${invoiceProjectId}/invoice?invoice_date=${invoiceDate}`, { method: 'POST', headers })
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      return err(detail?.detail ?? 'Could not generate invoice')
+    }
+    setInvoiceProjectId(''); setInvoiceDate('')
+    ok('Invoice generated'); await loadData()
   }
 
   const ingestPdf = async (e: FormEvent) => {
@@ -481,14 +526,52 @@ export default function Dashboard() {
                 <p className="page-subtitle">Exchange rates for invoice conversion</p>
               </div>
               <div className="card">
-                <div className="card-header"><span className="card-title">Ingest Bank PDF Rate</span></div>
+                <div className="card-header"><span className="card-title">Add Rate Manually</span></div>
+                <form onSubmit={addManualRate} className="form-grid">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Rate Date</label>
+                      <input className="input" type="date" value={manualRateDate} onChange={e => setManualRateDate(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Currency Code</label>
+                      <input className="input" placeholder="USD" value={manualRateCode} onChange={e => setManualRateCode(e.target.value.toUpperCase())} maxLength={5} required />
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Cash Buying</label>
+                      <input className="input" type="number" step="0.0001" placeholder="0.0000" value={manualCashBuying} onChange={e => setManualCashBuying(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Cash Selling</label>
+                      <input className="input" type="number" step="0.0001" placeholder="0.0000" value={manualCashSelling} onChange={e => setManualCashSelling(e.target.value)} required />
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">TTS Buying</label>
+                      <input className="input" type="number" step="0.0001" placeholder="0.0000" value={manualTtsBuying} onChange={e => setManualTtsBuying(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">TTS Selling</label>
+                      <input className="input" type="number" step="0.0001" placeholder="0.0000" value={manualTtsSelling} onChange={e => setManualTtsSelling(e.target.value)} required />
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit">Save Rate</button>
+                  </div>
+                </form>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Ingest Rate from Bank PDF</span></div>
                 <form onSubmit={ingestPdf} className="form-grid">
                   <div className="form-group">
                     <label className="form-label">PDF URL</label>
                     <input className="input" placeholder="https://bank.example/forex.pdf" value={pdfUrl} onChange={e => setPdfUrl(e.target.value)} required />
                   </div>
                   <div className="form-actions">
-                    <button className="btn btn-primary" type="submit">Ingest PDF</button>
+                    <button className="btn btn-secondary" type="submit">Ingest PDF</button>
                   </div>
                 </form>
               </div>
@@ -528,7 +611,32 @@ export default function Dashboard() {
             <>
               <div className="page-header">
                 <h1 className="page-title">Invoices</h1>
-                <p className="page-subtitle">Generated invoice history</p>
+                <p className="page-subtitle">Generate and view invoices</p>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Generate Invoice</span></div>
+                <form onSubmit={generateInvoice} className="form-grid">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Project</label>
+                      <select className="select" value={invoiceProjectId} onChange={e => setInvoiceProjectId(e.target.value)} required>
+                        <option value="">Select project…</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({clients.find(c => c.id === p.client_id)?.name ?? `client #${p.client_id}`})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Invoice Date</label>
+                      <input className="input" type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} required />
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit">Generate Invoice</button>
+                  </div>
+                </form>
               </div>
               <div className="card">
                 <div className="card-header">
@@ -650,8 +758,8 @@ export default function Dashboard() {
                         <thead><tr><th>#</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
                         <tbody>
                           {pagedUsers.map(u => (
-                            <>
-                              <tr key={u.id}>
+                            <Fragment key={u.id}>
+                              <tr>
                                 <td className="td-id">{u.id}</td>
                                 <td><strong>{u.username}</strong></td>
                                 <td style={{ color: 'var(--text-muted)' }}>{u.email}</td>
@@ -673,7 +781,7 @@ export default function Dashboard() {
                                 </td>
                               </tr>
                               {editingUser === u.id && (
-                                <tr key={`edit-${u.id}`}>
+                                <tr>
                                   <td colSpan={6} style={{ padding: '8px 14px', background: 'var(--surface-2)' }}>
                                     <div className="edit-row">
                                       <span style={{ fontSize: 12, color: 'var(--text-muted)', marginRight: 4 }}>Change role:</span>
@@ -691,7 +799,7 @@ export default function Dashboard() {
                                   </td>
                                 </tr>
                               )}
-                            </>
+                            </Fragment>
                           ))}
                         </tbody>
                       </table>
