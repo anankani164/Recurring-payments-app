@@ -1,12 +1,14 @@
 from contextlib import asynccontextmanager
 from datetime import date
 from datetime import datetime, timedelta
+import os
 from uuid import uuid4
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -31,7 +33,7 @@ from .config import (
 from .database import SessionLocal, get_db
 from .models import Client, FxRate, Invoice, JobLog, Project, SchedulerLock, User
 from .observability import configure_logging, log_event
-from .pdf_rates import PdfParseError, parse_bank_pdf_rates
+from .pdf_rates import PdfParseError, parse_bank_pdf_rates, parse_uploaded_pdf
 from .schemas import (
     ClientCreate,
     ClientRead,
@@ -141,7 +143,7 @@ def ensure_default_superadmin(db: Session) -> None:
     db.add(
         User(
             username="superadmin",
-            email="superadmin@local",
+            email="superadmin@example.com",
             password_hash=hash_password("Nankani1"),
             role="superadmin",
         )
@@ -173,21 +175,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve the embedded Next.js frontend if built files are present
+_web_out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web_out")
+_next_static = os.path.join(_web_out, "_next")
+if os.path.exists(_next_static):
+    app.mount("/_next", StaticFiles(directory=_next_static), name="nextjs_assets")
 
-@app.get("/", response_class=HTMLResponse)
+
+@app.get("/")
 def home():
-    return """
-    <html><body style='font-family:sans-serif;padding:24px;max-width:800px'>
-    <h1>Recurring Payments App (Single-Service)</h1>
-    <p>This app runs as one Railway service (API + scheduler).</p>
-    <ol>
-      <li>Open <a href='/docs'>/docs</a> for API operations.</li>
-      <li>Login via <code>POST /auth/login</code> and use Bearer token for protected endpoints.</li>
-      <li>Run <code>POST /run-jobs-now</code> to trigger invoices immediately.</li>
-    </ol>
-    <p><a href='/health'>Health</a></p>
-    </body></html>
-    """
+    index = os.path.join(_web_out, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    return HTMLResponse(f"<html><body><h1>Recurring Payments API v2</h1><p>web_out not found at: {_web_out}</p><p><a href='/docs'>API Docs</a></p></body></html>")
 
 
 @app.get("/health")
@@ -226,6 +226,18 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="User not found")
     if user.username == "superadmin" and payload.is_active is False:
         raise HTTPException(status_code=400, detail="Cannot deactivate superadmin")
+    if payload.username is not None:
+        conflict = db.execute(select(User).where(User.username == payload.username)).scalars().first()
+        if conflict and conflict.id != user_id:
+            raise HTTPException(status_code=409, detail="Username already taken")
+        user.username = payload.username
+    if payload.email is not None:
+        conflict = db.execute(select(User).where(User.email == payload.email)).scalars().first()
+        if conflict and conflict.id != user_id:
+            raise HTTPException(status_code=409, detail="Email already taken")
+        user.email = payload.email
+    if payload.password is not None:
+        user.password_hash = hash_password(payload.password)
     if payload.role is not None:
         if payload.role not in {"admin", "user", "superadmin"}:
             raise HTTPException(status_code=422, detail="Invalid role")
@@ -330,6 +342,31 @@ def ingest_pdf_rates(payload: ParsePdfRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Rate for this date/code already exists") from exc
     db.refresh(rate)
     create_job_log(db, "pdf_ingestion", "success", f"Ingested {rate.code} {rate.rate_date}")
+    return rate
+
+@app.post("/rates/upload-pdf", response_model=FxRateRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_user)])
+async def upload_pdf_rates(
+    file: UploadFile = File(...),
+    target_code: str = Form(default="USD"),
+    db: Session = Depends(get_db),
+):
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=422, detail="Only PDF files are accepted")
+    pdf_bytes = await file.read()
+    try:
+        parsed = parse_uploaded_pdf(pdf_bytes, target_code)
+    except PdfParseError as exc:
+        create_job_log(db, "pdf_upload", "failed", str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    rate = FxRate(source_url=f"upload:{file.filename}", **parsed)
+    db.add(rate)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Rate for this date/code already exists") from exc
+    db.refresh(rate)
+    create_job_log(db, "pdf_upload", "success", f"Uploaded {rate.code} {rate.rate_date}")
     return rate
 
 @app.post('/run-jobs-now', dependencies=[Depends(require_admin_user)])
