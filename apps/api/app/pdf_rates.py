@@ -7,6 +7,15 @@ from typing import Optional
 import httpx
 import pdfplumber
 
+_COL_GROUP_RE = {
+    "tts":  re.compile(r"\b(transfer|tts|tt|wire|telegraphic)\b", re.IGNORECASE),
+    "cash": re.compile(r"\bcash\b", re.IGNORECASE),
+}
+_COL_DIR_RE = {
+    "buying":  re.compile(r"\b(buy|buying|purchas)\b", re.IGNORECASE),
+    "selling": re.compile(r"\b(sell|selling)\b", re.IGNORECASE),
+}
+
 DATE_PATTERNS = [
     # "27 May 2026", "27-May-2026", "27/May/2026"
     re.compile(r"(\d{1,2})[\-/\s]([A-Za-z]{3,9})[\-/\s](\d{4})"),
@@ -23,6 +32,75 @@ DATE_PATTERNS = [
 
 class PdfParseError(ValueError):
     pass
+
+
+def _is_numeric_str(s: str) -> bool:
+    try:
+        float(s.replace(",", ""))
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+def _detect_col_map(table: list) -> dict[int, str] | None:
+    """
+    Scan header rows of a table to build {col_index: field_name}.
+    Handles merged-cell layouts (pdfplumber returns None for continuation columns)
+    and single-row combined headers like "TRANSFER BUY", "CASH SELL".
+    Returns None if the four required fields cannot be reliably identified.
+    """
+    col_group: dict[int, str] = {}
+    col_direction: dict[int, str] = {}
+
+    for row in table:
+        if not row:
+            continue
+        cells = [(str(c).strip() if c else "") for c in row]
+        # Skip data rows (3+ numeric values)
+        if sum(1 for c in cells if _is_numeric_str(c)) >= 3:
+            continue
+
+        # Propagate group labels left→right to cover merged cells
+        current_group: str | None = None
+        for i, cell in enumerate(cells):
+            matched_group = next((g for g, p in _COL_GROUP_RE.items() if p.search(cell)), None)
+            if matched_group:
+                current_group = matched_group
+                col_group[i] = matched_group
+            elif cell == "" and current_group is not None:
+                # Empty cell inherits the active group (merged cell continuation)
+                col_group[i] = current_group
+            elif cell:
+                # Non-empty unrecognised cell stops propagation
+                current_group = None
+
+        # Detect direction labels (may be on same row as group or a separate sub-header row)
+        for i, cell in enumerate(cells):
+            for dir_, pat in _COL_DIR_RE.items():
+                if pat.search(cell):
+                    col_direction[i] = dir_
+                    break
+
+    col_map = {
+        i: f"{col_group[i]}_{col_direction[i]}"
+        for i in set(col_group) & set(col_direction)
+    }
+    required = {"tts_buying", "tts_selling", "cash_buying", "cash_selling"}
+    return col_map if required.issubset(col_map.values()) else None
+
+
+def _detect_text_col_order(header_text: str) -> tuple[str, str, str, str]:
+    """
+    Determine field order from the header text that precedes the currency data row.
+    Returns 4 field names in positional order (values[0]…values[3]).
+    Default (Stanbic order): cash_buying, cash_selling, tts_buying, tts_selling.
+    Absa order (Transfer before Cash): tts_buying, tts_selling, cash_buying, cash_selling.
+    """
+    tts_match = _COL_GROUP_RE["tts"].search(header_text)
+    cash_match = _COL_GROUP_RE["cash"].search(header_text)
+    if tts_match and cash_match and tts_match.start() < cash_match.start():
+        return ("tts_buying", "tts_selling", "cash_buying", "cash_selling")
+    return ("cash_buying", "cash_selling", "tts_buying", "tts_selling")
 
 
 def _extract_text_via_ocr(pdf_path: Path) -> Optional[str]:
@@ -50,9 +128,25 @@ def _extract_text_via_ocr(pdf_path: Path) -> Optional[str]:
     return combined or None
 
 
-def _extract_rates_from_row(normalized: list[str], code: str) -> dict | None:
+def _extract_rates_from_row(
+    normalized: list[str], code: str, col_map: dict[int, str] | None = None
+) -> dict | None:
     if code not in normalized:
         return None
+
+    if col_map:
+        result: dict[str, float] = {}
+        required = {"tts_buying", "tts_selling", "cash_buying", "cash_selling"}
+        for col_idx, field_name in col_map.items():
+            if field_name not in required or col_idx >= len(normalized):
+                continue
+            try:
+                result[field_name] = _to_num(normalized[col_idx])
+            except ValueError:
+                return None
+        return {"code": code, **result} if result.keys() == required else None
+
+    # Positional fallback (assumes Cash then TTS order)
     code_index = normalized.index(code)
     if code_index + 4 >= len(normalized):
         return None
@@ -78,12 +172,14 @@ def _extract_rates_from_text(text: str, code: str) -> dict | None:
     if not match:
         return None
     values = match.groups()
+    # Use header text before the match to determine column order
+    field_order = _detect_text_col_order(text[: match.start()])
     return {
         "code": code,
-        "cash_buying": _to_num(values[0]),
-        "cash_selling": _to_num(values[1]),
-        "tts_buying": _to_num(values[2]),
-        "tts_selling": _to_num(values[3]),
+        field_order[0]: _to_num(values[0]),
+        field_order[1]: _to_num(values[1]),
+        field_order[2]: _to_num(values[2]),
+        field_order[3]: _to_num(values[3]),
     }
 
 
@@ -142,11 +238,12 @@ def _parse_from_path(pdf_path: Path, target_code: str) -> dict:
         for page in pdf.pages:
             tables = page.extract_tables() or []
             for table in tables:
+                col_map = _detect_col_map(table)
                 for row in table:
                     if not row:
                         continue
                     normalized = [str(col).strip() if col else "" for col in row]
-                    extracted = _extract_rates_from_row(normalized, code)
+                    extracted = _extract_rates_from_row(normalized, code, col_map)
                     if extracted:
                         return {"rate_date": rate_date, **extracted}
 

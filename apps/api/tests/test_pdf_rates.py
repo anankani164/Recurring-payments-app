@@ -1,6 +1,12 @@
 import pytest
 
-from app.pdf_rates import PdfParseError, _extract_rates_from_row, _extract_rates_from_text, _parse_date
+from app.pdf_rates import (
+    PdfParseError,
+    _detect_col_map,
+    _extract_rates_from_row,
+    _extract_rates_from_text,
+    _parse_date,
+)
 
 
 def test_parse_date_ymd():
@@ -93,3 +99,89 @@ def test_extract_rates_from_row_basic():
     parsed = _extract_rates_from_row(row, "USD")
     assert parsed is not None
     assert parsed["tts_selling"] == 10.40
+
+
+# ── Absa Bank PDF format ──────────────────────────────────────────────────────
+# Columns: CURRENCY | CODE | TRANSFER BUY | TRANSFER SELL | CASH BUY | CASH SELL
+# pdfplumber produces merged-cell headers as None in continuation columns:
+#   Row 0: ["", "", "TRANSFER", None, "CASH", None]
+#   Row 1: ["CURRENCY", "CODE", "BUY", "SELL", "BUY", "SELL"]
+#   Row 2: ["U.S. DOLLAR", "USD", "11.3500", "11.7500", "11.3500", "12.1700"]
+
+
+def test_detect_col_map_absa_merged_headers():
+    table = [
+        ["", "", "TRANSFER", None, "CASH", None],
+        ["CURRENCY", "CODE", "BUY", "SELL", "BUY", "SELL"],
+        ["U.S. DOLLAR", "USD", "11.3500", "11.7500", "11.3500", "12.1700"],
+    ]
+    col_map = _detect_col_map(table)
+    assert col_map is not None
+    assert col_map[2] == "tts_buying"
+    assert col_map[3] == "tts_selling"
+    assert col_map[4] == "cash_buying"
+    assert col_map[5] == "cash_selling"
+
+
+def test_detect_col_map_stanbic_merged_headers():
+    table = [
+        ["", "", "CASH", None, "TTs", None],
+        ["Currency", "Code", "Buying", "Selling", "Buying", "Selling"],
+        ["United States Dollars", "USD", "11.3800", "12.2200", "11.3800", "11.7500"],
+    ]
+    col_map = _detect_col_map(table)
+    assert col_map is not None
+    assert col_map[2] == "cash_buying"
+    assert col_map[3] == "cash_selling"
+    assert col_map[4] == "tts_buying"
+    assert col_map[5] == "tts_selling"
+
+
+def test_detect_col_map_combined_headers():
+    # Single-row headers: "TRANSFER BUY", "TRANSFER SELL", "CASH BUY", "CASH SELL"
+    table = [
+        ["CURRENCY", "CODE", "TRANSFER BUY", "TRANSFER SELL", "CASH BUY", "CASH SELL"],
+        ["U.S. DOLLAR", "USD", "11.3500", "11.7500", "11.3500", "12.1700"],
+    ]
+    col_map = _detect_col_map(table)
+    assert col_map is not None
+    assert col_map[2] == "tts_buying"
+    assert col_map[3] == "tts_selling"
+    assert col_map[4] == "cash_buying"
+    assert col_map[5] == "cash_selling"
+
+
+def test_detect_col_map_no_headers_returns_none():
+    # Table with no recognisable group headers → fall back to positional
+    table = [
+        ["Currency", "Code", "Buy", "Sell", "Buy", "Sell"],
+        ["USD", "11.38", "12.22", "11.38", "11.75"],
+    ]
+    assert _detect_col_map(table) is None
+
+
+def test_extract_rates_from_row_absa_with_col_map():
+    col_map = {2: "tts_buying", 3: "tts_selling", 4: "cash_buying", 5: "cash_selling"}
+    row = ["U.S. DOLLAR", "USD", "11.3500", "11.7500", "11.3500", "12.1700"]
+    result = _extract_rates_from_row(row, "USD", col_map)
+    assert result is not None
+    assert result["tts_buying"] == 11.35
+    assert result["tts_selling"] == 11.75
+    assert result["cash_buying"] == 11.35
+    assert result["cash_selling"] == 12.17
+
+
+def test_extract_rates_from_text_absa_order():
+    # Absa text: TRANSFER columns precede CASH columns
+    text = (
+        "ABSA BANK GHANA LIMITED\n"
+        "DAILY FOREX RATES - 28 MAY 2026\n"
+        "CURRENCY CODE TRANSFER BUY TRANSFER SELL CASH BUY CASH SELL\n"
+        "U.S. DOLLAR USD 11.3500 11.7500 11.3500 12.1700\n"
+    )
+    result = _extract_rates_from_text(text, "USD")
+    assert result is not None
+    assert result["tts_buying"] == 11.35
+    assert result["tts_selling"] == 11.75
+    assert result["cash_buying"] == 11.35
+    assert result["cash_selling"] == 12.17
