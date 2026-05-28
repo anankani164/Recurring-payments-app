@@ -218,13 +218,11 @@ def home():
 
 
 @app.get("/health")
-def health(db: Session = Depends(get_db)):
-    hour, minute = _get_scheduler_time(db)
+def health():
     return {
         "status": "ok",
         "single_service_mode": True,
         "scheduler_enabled": ENABLE_SCHEDULER,
-        "scheduler_time": f"{hour:02d}:{minute:02d}",
     }
 
 
