@@ -16,7 +16,7 @@ type Invoice = {
 }
 type JobLog = { id: number; job_name: string; status: string; message: string; created_at: string }
 type User = { id: number; username: string; email: string; role: string; is_active: boolean }
-type Tab = 'overview' | 'clients' | 'projects' | 'rates' | 'invoices' | 'jobs' | 'users'
+type Tab = 'overview' | 'clients' | 'projects' | 'rates' | 'invoices' | 'jobs' | 'users' | 'settings'
 
 const PAGE_SIZE = 8
 const RATE_TYPES = ['cash_buying', 'cash_selling', 'tts_buying', 'tts_selling']
@@ -30,6 +30,7 @@ const NAV: { id: Tab; label: string; icon: string; mobileLabel: string }[] = [
   { id: 'invoices',  label: 'Invoices',  icon: '◻', mobileLabel: 'Invoices' },
   { id: 'jobs',      label: 'Job Logs',  icon: '◉', mobileLabel: 'Jobs'     },
   { id: 'users',     label: 'Users',     icon: '◐', mobileLabel: 'Users'    },
+  { id: 'settings',  label: 'Settings',  icon: '⚙', mobileLabel: 'Settings' },
 ]
 
 function Pagination({ page, pages, onPrev, onNext }: { page: number; pages: number; onPrev: () => void; onNext: () => void }) {
@@ -132,6 +133,8 @@ export default function Dashboard() {
   const [newUserRole, setNewUserRole] = useState('user')
   const [editingUser, setEditingUser] = useState<number | null>(null)
 
+  const [schedulerTime, setSchedulerTime] = useState('08:00')
+
   const [clientPage,  setClientPage]  = useState(1)
   const [projectPage, setProjectPage] = useState(1)
   const [userPage,    setUserPage]    = useState(1)
@@ -150,13 +153,14 @@ export default function Dashboard() {
   const loadData = async () => {
     if (!token) return
     try {
-      const [cR, pR, rR, iR, jR, uR] = await Promise.all([
-        fetch(`${apiBase}/clients`,  { headers }),
-        fetch(`${apiBase}/projects`, { headers }),
-        fetch(`${apiBase}/rates`,    { headers }),
-        fetch(`${apiBase}/invoices`, { headers }),
-        fetch(`${apiBase}/jobs`,     { headers }),
-        fetch(`${apiBase}/users`,    { headers }),
+      const [cR, pR, rR, iR, jR, uR, sR] = await Promise.all([
+        fetch(`${apiBase}/clients`,   { headers }),
+        fetch(`${apiBase}/projects`,  { headers }),
+        fetch(`${apiBase}/rates`,     { headers }),
+        fetch(`${apiBase}/invoices`,  { headers }),
+        fetch(`${apiBase}/jobs`,      { headers }),
+        fetch(`${apiBase}/users`,     { headers }),
+        fetch(`${apiBase}/settings`,  { headers }),
       ])
       if (cR.ok) setClients(await cR.json())
       if (pR.ok) setProjects(await pR.json())
@@ -164,6 +168,11 @@ export default function Dashboard() {
       if (iR.ok) setInvoices(await iR.json())
       if (jR.ok) setJobs(await jR.json())
       if (uR.ok) setUsers(await uR.json())
+      if (sR.ok) {
+        const settings: { key: string; value: string }[] = await sR.json()
+        const t = settings.find(s => s.key === 'scheduler_time')
+        if (t) setSchedulerTime(t.value)
+      }
     } catch { err('Failed to load data from API') }
   }
 
@@ -400,6 +409,19 @@ export default function Dashboard() {
     const res = await fetch(`${apiBase}/run-jobs-now`, { method: 'POST', headers })
     if (!res.ok) return err('Failed to run jobs')
     ok('Jobs completed'); await loadData()
+  }
+
+  const saveSchedulerTime = async () => {
+    setMsg('')
+    const res = await fetch(`${apiBase}/settings/scheduler_time`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ value: schedulerTime }),
+    })
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      return err(detail?.detail ?? 'Could not update scheduler time')
+    }
+    ok('Scheduler time saved — invoice check will run daily at ' + schedulerTime)
   }
 
   // Paged slices
@@ -1157,6 +1179,49 @@ export default function Dashboard() {
                     <Pagination page={userPage} pages={userPages} onPrev={() => setUserPage(p => p - 1)} onNext={() => setUserPage(p => p + 1)} />
                   </>
                 )}
+              </div>
+            </>
+          )}
+          {/* ── Settings ─────────────────────────────────────── */}
+          {tab === 'settings' && (
+            <>
+              <div className="page-header">
+                <h1 className="page-title">Settings</h1>
+                <p className="page-subtitle">Application configuration</p>
+              </div>
+
+              <div className="card">
+                <div className="card-header"><span className="card-title">Invoice Scheduler</span></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+                  The scheduler runs every day at the time below and automatically generates invoices for any
+                  projects whose next invoice date has arrived. If a project&apos;s invoice date has already
+                  passed and no invoice was generated yet, it will be created the next time the scheduler runs.
+                </p>
+                <div className="form-grid">
+                  <div className="form-row">
+                    <div className="form-group" style={{ maxWidth: 200 }}>
+                      <label className="form-label">Daily run time</label>
+                      <input
+                        className="input"
+                        type="time"
+                        value={schedulerTime}
+                        onChange={e => setSchedulerTime(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" onClick={saveSchedulerTime}>Save Time</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header"><span className="card-title">Manual Run</span></div>
+                <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+                  Trigger the invoice generation job immediately without waiting for the scheduled time.
+                  Useful after adding a new project or correcting a rate.
+                </p>
+                <button className="btn btn-secondary" onClick={runJobsNow}>▶ Run Jobs Now</button>
               </div>
             </>
           )}

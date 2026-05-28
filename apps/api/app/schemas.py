@@ -170,3 +170,13 @@ class UserUpdate(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class AppSettingRead(BaseModel):
+    key: str
+    value: str
+    model_config = {"from_attributes": True}
+
+
+class AppSettingUpdate(BaseModel):
+    value: str

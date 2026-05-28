@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
@@ -28,14 +29,15 @@ from .config import (
     ENABLE_ALERT_EMAILS,
     ENABLE_SCHEDULER,
     JSON_LOGS,
-    SCHEDULER_INTERVAL_MINUTES,
     validate_runtime_config,
 )
 from .database import SessionLocal, get_db
-from .models import Client, FxRate, Invoice, JobLog, Project, SchedulerLock, User
+from .models import AppSetting, Client, FxRate, Invoice, JobLog, Project, SchedulerLock, User
 from .observability import configure_logging, log_event
 from .pdf_rates import PdfParseError, parse_bank_pdf_rates, parse_uploaded_pdf
 from .schemas import (
+    AppSettingRead,
+    AppSettingUpdate,
     ClientCreate,
     ClientRead,
     FxRateCreate,
@@ -158,15 +160,33 @@ def ensure_default_superadmin(db: Session) -> None:
     db.commit()
 
 
+def _get_scheduler_time(db: Session) -> tuple[int, int]:
+    """Return (hour, minute) for the daily scheduler cron, reading from app_settings."""
+    try:
+        setting = db.execute(select(AppSetting).where(AppSetting.key == "scheduler_time")).scalars().first()
+        if setting:
+            h, m = setting.value.split(":")
+            return int(h), int(m)
+    except Exception:  # noqa: BLE001
+        pass
+    return 8, 0  # default 08:00
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_runtime_config()
     configure_logging(JSON_LOGS)
-    log_event("info", "app_startup", scheduler_enabled=ENABLE_SCHEDULER, scheduler_interval=SCHEDULER_INTERVAL_MINUTES)
     with SessionLocal() as db:
         ensure_default_superadmin(db)
+        hour, minute = _get_scheduler_time(db)
+    log_event("info", "app_startup", scheduler_enabled=ENABLE_SCHEDULER, scheduler_cron=f"{hour:02d}:{minute:02d}")
     if ENABLE_SCHEDULER:
-        scheduler.add_job(run_embedded_worker, "interval", minutes=SCHEDULER_INTERVAL_MINUTES, id="embedded_worker")
+        scheduler.add_job(
+            run_embedded_worker,
+            CronTrigger(hour=hour, minute=minute),
+            id="embedded_worker",
+            replace_existing=True,
+        )
         scheduler.start()
     yield
     if scheduler.running:
@@ -198,13 +218,47 @@ def home():
 
 
 @app.get("/health")
-def health():
+def health(db: Session = Depends(get_db)):
+    hour, minute = _get_scheduler_time(db)
     return {
         "status": "ok",
         "single_service_mode": True,
         "scheduler_enabled": ENABLE_SCHEDULER,
-        "scheduler_interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+        "scheduler_time": f"{hour:02d}:{minute:02d}",
     }
+
+
+@app.get("/settings", response_model=list[AppSettingRead], dependencies=[Depends(require_admin_user)])
+def list_settings(db: Session = Depends(get_db)):
+    return db.execute(select(AppSetting).order_by(AppSetting.key)).scalars().all()
+
+
+@app.patch("/settings/{key}", response_model=AppSettingRead, dependencies=[Depends(require_admin_user)])
+def update_setting(key: str, payload: AppSettingUpdate, db: Session = Depends(get_db)):
+    allowed = {"scheduler_time"}
+    if key not in allowed:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    if key == "scheduler_time":
+        try:
+            h, m = payload.value.split(":")
+            hour, minute = int(h), int(m)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(status_code=422, detail="scheduler_time must be HH:MM (00:00–23:59)")
+    setting = db.execute(select(AppSetting).where(AppSetting.key == key)).scalars().first()
+    if not setting:
+        setting = AppSetting(key=key, value=payload.value)
+        db.add(setting)
+    else:
+        setting.value = payload.value
+    db.commit()
+    db.refresh(setting)
+    if key == "scheduler_time" and ENABLE_SCHEDULER and scheduler.running:
+        h, m = map(int, payload.value.split(":"))
+        scheduler.reschedule_job("embedded_worker", trigger=CronTrigger(hour=h, minute=m))
+        log_event("info", "scheduler_rescheduled", new_time=payload.value)
+    return setting
 
 
 @app.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_superadmin_user)])
