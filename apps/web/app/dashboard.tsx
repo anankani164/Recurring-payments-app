@@ -16,6 +16,7 @@ type Invoice = {
 }
 type JobLog = { id: number; job_name: string; status: string; message: string; created_at: string }
 type User = { id: number; username: string; email: string; role: string; is_active: boolean }
+type RatePdf = { filename: string; size_bytes: number; created_at: string; invoice_id: number | null }
 type Tab = 'overview' | 'clients' | 'projects' | 'rates' | 'invoices' | 'jobs' | 'users' | 'settings'
 
 const PAGE_SIZE = 8
@@ -134,6 +135,7 @@ export default function Dashboard() {
   const [editingUser, setEditingUser] = useState<number | null>(null)
 
   const [schedulerTime, setSchedulerTime] = useState('08:00')
+  const [ratePdfs, setRatePdfs] = useState<RatePdf[]>([])
 
   const [clientPage,  setClientPage]  = useState(1)
   const [projectPage, setProjectPage] = useState(1)
@@ -153,14 +155,15 @@ export default function Dashboard() {
   const loadData = async () => {
     if (!token) return
     try {
-      const [cR, pR, rR, iR, jR, uR, sR] = await Promise.all([
-        fetch(`${apiBase}/clients`,   { headers }),
-        fetch(`${apiBase}/projects`,  { headers }),
-        fetch(`${apiBase}/rates`,     { headers }),
-        fetch(`${apiBase}/invoices`,  { headers }),
-        fetch(`${apiBase}/jobs`,      { headers }),
-        fetch(`${apiBase}/users`,     { headers }),
-        fetch(`${apiBase}/settings`,  { headers }),
+      const [cR, pR, rR, iR, jR, uR, sR, pdfR] = await Promise.all([
+        fetch(`${apiBase}/clients`,    { headers }),
+        fetch(`${apiBase}/projects`,   { headers }),
+        fetch(`${apiBase}/rates`,      { headers }),
+        fetch(`${apiBase}/invoices`,   { headers }),
+        fetch(`${apiBase}/jobs`,       { headers }),
+        fetch(`${apiBase}/users`,      { headers }),
+        fetch(`${apiBase}/settings`,   { headers }),
+        fetch(`${apiBase}/rate-pdfs`,  { headers }),
       ])
       if (cR.ok) setClients(await cR.json())
       if (pR.ok) setProjects(await pR.json())
@@ -173,6 +176,7 @@ export default function Dashboard() {
         const t = settings.find(s => s.key === 'scheduler_time')
         if (t) setSchedulerTime(t.value)
       }
+      if (pdfR.ok) setRatePdfs(await pdfR.json())
     } catch { err('Failed to load data from API') }
   }
 
@@ -409,6 +413,13 @@ export default function Dashboard() {
     const res = await fetch(`${apiBase}/run-jobs-now`, { method: 'POST', headers })
     if (!res.ok) return err('Failed to run jobs')
     ok('Jobs completed'); await loadData()
+  }
+
+  const deleteRatePdf = async (filename: string) => {
+    setMsg('')
+    const res = await fetch(`${apiBase}/rate-pdfs/${encodeURIComponent(filename)}`, { method: 'DELETE', headers })
+    if (!res.ok) return err('Could not delete PDF')
+    ok('PDF deleted'); await loadData()
   }
 
   const saveSchedulerTime = async () => {
@@ -1213,6 +1224,41 @@ export default function Dashboard() {
                     <button className="btn btn-primary" onClick={saveSchedulerTime}>Save Time</button>
                   </div>
                 </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">Stored Rate PDFs</span>
+                  <span className="card-count">{ratePdfs.length}</span>
+                </div>
+                <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+                  PDFs downloaded automatically during invoice generation. They are kept for 90 days as
+                  rate proof. Deleting a PDF here only removes the file — the invoice is not affected.
+                </p>
+                {ratePdfs.length === 0 ? <Empty label="stored PDFs" /> : (
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Filename</th><th>Size</th><th>Saved</th><th>Invoice</th><th></th></tr></thead>
+                      <tbody>
+                        {ratePdfs.map(pdf => (
+                          <tr key={pdf.filename}>
+                            <td data-label="Filename" className="td-mono" style={{ fontSize: 12 }}>{pdf.filename}</td>
+                            <td data-label="Size" className="td-mono">{(pdf.size_bytes / 1024).toFixed(1)} KB</td>
+                            <td data-label="Saved" className="td-mono">{pdf.created_at.slice(0, 10)}</td>
+                            <td data-label="Invoice">
+                              {pdf.invoice_id
+                                ? <span className="badge badge-grey">#{pdf.invoice_id}</span>
+                                : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>unlinked</span>}
+                            </td>
+                            <td data-label="">
+                              <button className="btn btn-danger-soft btn-sm" onClick={() => deleteRatePdf(pdf.filename)}>Delete</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               <div className="card">

@@ -57,7 +57,7 @@ from .schemas import (
     UserRead,
     UserUpdate,
 )
-from .services import cleanup_old_rate_pdfs, create_job_log, generate_invoice_for_project, send_invoice_email
+from .services import cleanup_old_rate_pdfs, create_job_log, generate_invoice_for_project, next_date_for_recurrence, send_invoice_email
 
 scheduler = BackgroundScheduler()
 
@@ -484,6 +484,18 @@ def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
     invoice = db.get(Invoice, invoice_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    # Roll back next_invoice_date so the invoice can be cleanly regenerated
+    project = db.get(Project, invoice.project_id)
+    if project:
+        expected_next = next_date_for_recurrence(invoice.invoice_date, project.recurrence)
+        if project.next_invoice_date == expected_next:
+            project.next_invoice_date = invoice.invoice_date
+    # Delete the linked rate PDF file if it exists
+    if invoice.rate_pdf_path and os.path.exists(invoice.rate_pdf_path):
+        try:
+            os.remove(invoice.rate_pdf_path)
+        except OSError:
+            pass
     db.delete(invoice)
     db.commit()
 
@@ -513,3 +525,46 @@ def download_invoice_rate_pdf(invoice_id: int, db: Session = Depends(get_db)):
         media_type="application/pdf",
         filename=f"rate_proof_{invoice.invoice_date}.pdf",
     )
+
+
+@app.get("/rate-pdfs", dependencies=[Depends(require_admin_user)])
+def list_rate_pdfs(db: Session = Depends(get_db)):
+    from .services import PDF_RATES_DIR
+    pdf_dir = PDF_RATES_DIR
+    if not os.path.isdir(pdf_dir):
+        return []
+    # Map absolute path → invoice_id for all invoices that reference a PDF
+    inv_rows = db.execute(select(Invoice).where(Invoice.rate_pdf_path.isnot(None))).scalars().all()
+    path_to_invoice = {inv.rate_pdf_path: inv.id for inv in inv_rows}
+    result = []
+    for fname in sorted(os.listdir(pdf_dir), reverse=True):
+        if not fname.endswith(".pdf"):
+            continue
+        fpath = os.path.join(pdf_dir, fname)
+        try:
+            stat = os.stat(fpath)
+            result.append({
+                "filename": fname,
+                "size_bytes": stat.st_size,
+                "created_at": datetime.utcfromtimestamp(stat.st_mtime).isoformat(),
+                "invoice_id": path_to_invoice.get(fpath),
+            })
+        except OSError:
+            continue
+    return result
+
+
+@app.delete("/rate-pdfs/{filename}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_user)])
+def delete_rate_pdf(filename: str, db: Session = Depends(get_db)):
+    from .services import PDF_RATES_DIR
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    fpath = os.path.join(PDF_RATES_DIR, filename)
+    if not os.path.exists(fpath):
+        raise HTTPException(status_code=404, detail="PDF not found")
+    # Clear the reference on any linked invoice
+    inv = db.execute(select(Invoice).where(Invoice.rate_pdf_path == fpath)).scalars().first()
+    if inv:
+        inv.rate_pdf_path = None
+        db.commit()
+    os.remove(fpath)
