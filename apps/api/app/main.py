@@ -98,7 +98,7 @@ def run_embedded_worker() -> None:
             projects = db.execute(select(Project).where(Project.next_invoice_date <= run_date)).scalars().all()
             for project in projects:
                 try:
-                    invoice = generate_invoice_for_project(db, project, run_date)
+                    invoice = generate_invoice_for_project(db, project, project.next_invoice_date)
                     client = db.get(Client, project.client_id)
                     if client:
                         try:
